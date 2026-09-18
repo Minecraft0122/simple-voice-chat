@@ -14,6 +14,12 @@ public interface VoicechatSocket {
 
     void send(byte[] data, SocketAddress address) throws Exception;
 
+    /**
+     * Releases the transport connection of one player, if the transport is connection oriented.
+     */
+    default void closeConnection(SocketAddress address) {
+    }
+
     int getLocalPort();
 
     void close();

@@ -37,7 +37,8 @@ public class Server extends Thread {
     private final boolean dedicated;
     private int port;
     private final MinecraftServer server;
-    private VoicechatSocket socket;
+    private volatile VoicechatSocket socket;
+    private volatile boolean running = true;
     private final ProcessThread processThread;
     private final BlockingQueue<RawUdpPacket> packetQueue;
     private final PingManager pingManager;
@@ -53,10 +54,13 @@ public class Server extends Thread {
             }
             int configPort = Voicechat.SERVER_CONFIG.voiceChatPort.get();
             if (configPort < 0) {
-                Voicechat.LOGGER.info("Using the Minecraft servers port as voice chat port");
-                port = server.getPort();
+                Voicechat.LOGGER.warn("The TCP voice chat cannot share the Minecraft port; using voice port 24454 for legacy port=-1");
+                port = 24454;
             } else {
                 port = configPort;
+            }
+            if (port != 0 && port == server.getPort()) {
+                throw new IllegalArgumentException("TCP voice chat needs a port different from the Minecraft server port. Change port in voicechat-server.properties.");
             }
         } else {
             port = 0;
@@ -66,7 +70,7 @@ public class Server extends Thread {
         connections = new ConcurrentHashMap<>();
         unCheckedConnections = new ConcurrentHashMap<>();
         secrets = new ConcurrentHashMap<>();
-        packetQueue = new LinkedBlockingQueue<>();
+        packetQueue = new LinkedBlockingQueue<>(4096);
         pingManager = new PingManager(this);
         playerStateManager = new PlayerStateManager(this);
         groupManager = new ServerGroupManager(this);
@@ -75,7 +79,6 @@ public class Server extends Thread {
         setName("VoiceChatServerThread");
         setUncaughtExceptionHandler(new VoicechatUncaughtExceptionHandler());
         processThread = new ProcessThread();
-        processThread.start();
     }
 
     public void onPlayerLoggedIn(ServerPlayer player) {
@@ -113,6 +116,9 @@ public class Server extends Thread {
     @Override
     public void run() {
         try {
+            if (!running) {
+                return;
+            }
             String bindAddress = getBindAddress();
             try {
                 InetAddress.getByName(bindAddress);
@@ -122,6 +128,10 @@ public class Server extends Thread {
                 bindAddress = "";
             }
             socket.open(port, bindAddress);
+            if (!running) {
+                return;
+            }
+            processThread.start();
 
             if (bindAddress.isEmpty()) {
                 Voicechat.LOGGER.info("Voice chat server started at port {}", socket.getLocalPort());
@@ -129,9 +139,13 @@ public class Server extends Thread {
                 Voicechat.LOGGER.info("Voice chat server started at {}:{}", bindAddress, socket.getLocalPort());
             }
 
-            while (!socket.isClosed()) {
+            while (running && !socket.isClosed()) {
                 try {
-                    packetQueue.add(socket.read());
+                    RawUdpPacket packet = socket.read();
+                    if (!packetQueue.offer(packet)) {
+                        socket.closeConnection(packet.getSocketAddress());
+                        CooldownTimer.run("tcp_packet_queue_full", () -> Voicechat.LOGGER.warn("TCP voice packet queue is full; closing the sending connection"));
+                    }
                 } catch (Exception e) {
                     // Only log an error if the error isn't caused by the socket being closed
                     if (!(e instanceof SocketException && e.getCause() instanceof AsynchronousCloseException)) {
@@ -143,6 +157,11 @@ public class Server extends Thread {
             }
         } catch (Exception e) {
             Voicechat.LOGGER.error("Voice chat server error", e);
+        } finally {
+            running = false;
+            socket.close();
+            processThread.close();
+            packetQueue.clear();
         }
     }
 
@@ -184,6 +203,12 @@ public class Server extends Thread {
      * @throws Exception if an error opening the socket on the new port occurs
      */
     public void changePort(int port) throws Exception {
+        if (!running) {
+            throw new IllegalStateException("Voice chat server is closed");
+        }
+        if (port != 0 && port == server.getPort()) {
+            throw new IllegalArgumentException("TCP voice chat cannot share the Minecraft server port");
+        }
         VoicechatSocket newSocket = PluginManager.instance().getSocketImplementation(server);
         newSocket.open(port, getBindAddress());
         VoicechatSocket old = socket;
@@ -193,6 +218,7 @@ public class Server extends Thread {
         connections.clear();
         unCheckedConnections.clear();
         secrets.clear();
+        packetQueue.clear();
     }
 
     public Secret getSecret(UUID playerUUID) {
@@ -222,13 +248,20 @@ public class Server extends Thread {
     }
 
     public void disconnectClient(UUID playerUUID) {
-        connections.remove(playerUUID);
-        unCheckedConnections.remove(playerUUID);
+        closeConnection(connections.remove(playerUUID));
+        closeConnection(unCheckedConnections.remove(playerUUID));
         secrets.remove(playerUUID);
         PluginManager.instance().onPlayerDisconnected(playerUUID);
     }
 
+    private void closeConnection(@Nullable ClientConnection connection) {
+        if (connection != null) {
+            socket.closeConnection(connection.getAddress());
+        }
+    }
+
     public void close() {
+        running = false;
         socket.close();
         processThread.close();
 
@@ -236,11 +269,11 @@ public class Server extends Thread {
     }
 
     public boolean isClosed() {
-        return !processThread.running;
+        return !running;
     }
 
     private class ProcessThread extends Thread {
-        private boolean running;
+        private volatile boolean running;
         private long lastKeepAlive;
 
         public ProcessThread() {
@@ -296,7 +329,10 @@ public class Server extends Thread {
                             if (connection == null) {
                                 connection = connections.get(packet.getPlayerUUID());
                             }
-                            if (connection == null) {
+                            // A reconnect uses a new TCP endpoint. Never acknowledge it on the old stream.
+                            if (connection == null || !connection.getAddress().equals(message.getAddress())) {
+                                closeConnection(connections.remove(packet.getPlayerUUID()));
+                                closeConnection(unCheckedConnections.remove(packet.getPlayerUUID()));
                                 connection = new ClientConnection(packet.getPlayerUUID(), message.getAddress());
                                 unCheckedConnections.put(packet.getPlayerUUID(), connection);
                                 Voicechat.LOGGER.info("Successfully authenticated player {}", packet.getPlayerUUID());
@@ -505,9 +541,18 @@ public class Server extends Thread {
     private void sendKeepAlives() {
         long timestamp = System.currentTimeMillis();
 
+        unCheckedConnections.values().removeIf(connection -> {
+            if (timestamp - connection.getLastKeepAliveResponse() >= Voicechat.SERVER_CONFIG.keepAlive.get() * 10L) {
+                closeConnection(connection);
+                return true;
+            }
+            return false;
+        });
+
         connections.values().removeIf(connection -> {
             if (timestamp - connection.getLastKeepAliveResponse() >= Voicechat.SERVER_CONFIG.keepAlive.get() * 10L) {
                 // Don't call disconnectClient here!
+                closeConnection(connection);
                 secrets.remove(connection.getPlayerUUID());
                 Voicechat.LOGGER.info("Player {} timed out", connection.getPlayerUUID());
                 ServerPlayer player = server.getPlayerList().getPlayer(connection.getPlayerUUID());

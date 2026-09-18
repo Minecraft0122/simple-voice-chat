@@ -6,6 +6,7 @@ import de.maxhenkel.voicechat.debug.CooldownTimer;
 import de.maxhenkel.voicechat.gui.onboarding.OnboardingManager;
 import de.maxhenkel.voicechat.natives.ClientNativeManager;
 import de.maxhenkel.voicechat.plugins.ClientPluginManager;
+import de.maxhenkel.voicechat.intercompatibility.ClientCompatibilityManager;
 import de.maxhenkel.voicechat.voice.client.speaker.SpeakerException;
 import de.maxhenkel.voicechat.voice.common.NamedThreadPoolFactory;
 import de.maxhenkel.voicechat.voice.common.SoundPacket;
@@ -39,6 +40,12 @@ public class ClientVoicechat {
     @Nullable
     private AudioRecorder recorder;
     private final long startTime;
+    private final Object connectionLock = new Object();
+    private volatile long connectionGeneration;
+    private volatile Thread reconnectThread;
+    private volatile boolean closed;
+    @Nullable
+    private volatile ClientVoicechatConnection failedConnection;
 
     public ClientVoicechat() {
         this.startTime = System.currentTimeMillis();
@@ -54,19 +61,108 @@ public class ClientVoicechat {
 
     public void onVoiceChatDisconnected() {
         closeMicThread();
-        if (connection != null) {
-            connection.close();
+        ClientVoicechatConnection old;
+        synchronized (connectionLock) {
+            old = connection;
             connection = null;
+            connectionGeneration++;
+            failedConnection = null;
+            interruptReconnectLocked();
         }
+        if (old != null) old.close();
     }
 
     public void connect(InitializationData data) throws Exception {
-        initializationData = data;
-        Voicechat.LOGGER.info("Connecting to voice chat server: '{}:{}'", initializationData.getServerIP(), initializationData.getServerPort());
-        connection = new ClientVoicechatConnection(this, initializationData);
-        connection.start();
+        ClientVoicechatConnection old;
+        long generation;
+        synchronized (connectionLock) {
+            closed = false;
+            generation = ++connectionGeneration;
+            interruptReconnectLocked();
+            old = connection;
+            connection = null;
+            initializationData = data;
+        }
+        if (old != null) old.close();
+        Voicechat.LOGGER.info("Connecting to voice chat server: '{}:{}'", data.getServerIP(), data.getServerPort());
+        ClientVoicechatConnection next = new ClientVoicechatConnection(this, data);
+        synchronized (connectionLock) {
+            if (closed || generation != connectionGeneration) {
+                next.close();
+                return;
+            }
+            connection = next;
+        }
+        next.start();
         OnboardingManager.onConnecting();
         ClientNativeManager.onConnecting();
+    }
+
+    void scheduleReconnect(ClientVoicechatConnection failed) {
+        synchronized (connectionLock) {
+            if (closed || connection != failed) return;
+            connection = null;
+            failedConnection = failed;
+            long generation = ++connectionGeneration;
+            InitializationData data = initializationData;
+            interruptReconnectLocked();
+            Thread retry = new Thread(() -> reconnectLoop(generation, data), "VoiceChatReconnectThread");
+            retry.setDaemon(true);
+            reconnectThread = retry;
+            retry.start();
+        }
+        closeMicThread();
+        Minecraft.getInstance().execute(() -> {
+            synchronized (connectionLock) {
+                if (failedConnection != failed) return;
+                failedConnection = null;
+            }
+            ClientCompatibilityManager.INSTANCE.emitVoiceChatDisconnectedEvent();
+        });
+    }
+
+    private void reconnectLoop(long generation, InitializationData data) {
+        long delay = 1000L;
+        try {
+            while (true) {
+                Thread.sleep(delay);
+                synchronized (connectionLock) {
+                    if (closed || generation != connectionGeneration || initializationData != data) return;
+                }
+                Minecraft.getInstance().execute(() -> {
+                    synchronized (connectionLock) {
+                        if (closed || generation != connectionGeneration || connection != null || initializationData != data) return;
+                    }
+                    try {
+                        ClientVoicechatConnection next = new ClientVoicechatConnection(this, data);
+                        synchronized (connectionLock) {
+                            if (closed || generation != connectionGeneration || connection != null || initializationData != data) {
+                                next.close();
+                                return;
+                            }
+                            connection = next;
+                        }
+                        next.start();
+                        OnboardingManager.onConnecting();
+                        ClientNativeManager.onConnecting();
+                    } catch (Exception e) {
+                        Voicechat.LOGGER.warn("Failed to reconnect voice chat", e);
+                    }
+                });
+                delay = Math.min(delay * 2L, 30000L);
+            }
+        } catch (InterruptedException ignored) {
+        } finally {
+            synchronized (connectionLock) {
+                if (Thread.currentThread() == reconnectThread) reconnectThread = null;
+            }
+        }
+    }
+
+    private void interruptReconnectLocked() {
+        Thread retry = reconnectThread;
+        reconnectThread = null;
+        if (retry != null) retry.interrupt();
     }
 
     public void processSoundPacket(SoundPacket packet) {
@@ -256,6 +352,16 @@ public class ClientVoicechat {
     }
 
     public void close() {
+        ClientVoicechatConnection old;
+        synchronized (connectionLock) {
+            closed = true;
+            connectionGeneration++;
+            failedConnection = null;
+            interruptReconnectLocked();
+            old = connection;
+            connection = null;
+        }
+
         synchronized (audioChannels) {
             Voicechat.LOGGER.info("Clearing audio channels");
             audioChannels.forEach((uuid, audioChannel) -> audioChannel.closeAndKill());
@@ -274,10 +380,7 @@ public class ClientVoicechat {
 
         closeMicThread();
 
-        if (connection != null) {
-            connection.close();
-            connection = null;
-        }
+        if (old != null) old.close();
 
         if (recorder != null) {
             AudioRecorder rec = recorder;

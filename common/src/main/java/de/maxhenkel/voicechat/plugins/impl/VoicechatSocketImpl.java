@@ -4,46 +4,51 @@ import de.maxhenkel.voicechat.Voicechat;
 import de.maxhenkel.voicechat.api.RawUdpPacket;
 import de.maxhenkel.voicechat.api.VoicechatSocket;
 import de.maxhenkel.voicechat.intercompatibility.CommonCompatibilityManager;
+import de.maxhenkel.voicechat.voice.transport.TcpServer;
 
 import javax.annotation.Nullable;
 import java.net.*;
 
-public class VoicechatSocketImpl extends VoicechatSocketBase implements VoicechatSocket {
+/** Server-side voice socket backed by the TCP transport. */
+public class VoicechatSocketImpl implements VoicechatSocket {
 
     @Nullable
-    private DatagramSocket socket;
+    private volatile TcpServer server;
 
     @Override
-    public void open(int port, String bindAddress) throws Exception {
-        if (socket != null) {
+    public synchronized void open(int port, String bindAddress) throws Exception {
+        if (server != null) {
             throw new IllegalStateException("Socket already opened");
         }
         boolean dedicated = CommonCompatibilityManager.INSTANCE.isDedicatedServer();
         if (dedicated) {
             checkCorrectHost();
         }
-        InetAddress address = null;
+        String requestedAddress = bindAddress == null ? "" : bindAddress;
         try {
-            if (!bindAddress.isEmpty()) {
-                address = InetAddress.getByName(bindAddress);
+            if (!requestedAddress.isEmpty()) {
+                InetAddress.getByName(requestedAddress);
             }
-        } catch (Exception e) {
-            bindAddress = "";
-            Voicechat.LOGGER.error("Failed to parse bind IP address '{}'", bindAddress, e);
+        } catch (UnknownHostException e) {
+            Voicechat.LOGGER.error("Failed to parse bind IP address '{}'", requestedAddress, e);
+            requestedAddress = "";
         }
-
+        long timeout = Math.max(30_000L, Voicechat.SERVER_CONFIG.keepAlive.get() * 10L);
+        TcpServer transport = new TcpServer((int) Math.min(Integer.MAX_VALUE, timeout));
         try {
             try {
-                socket = new DatagramSocket(port, address);
+                transport.open(port, requestedAddress);
             } catch (BindException e) {
-                if (address == null || bindAddress.equals("0.0.0.0")) {
+                if (requestedAddress.isEmpty() || requestedAddress.equals("0.0.0.0")) {
                     throw e;
                 }
-                Voicechat.LOGGER.error("Failed to bind to address '{}', binding to wildcard IP instead", bindAddress);
-                socket = new DatagramSocket(port);
+                Voicechat.LOGGER.error("Failed to bind to address '{}', binding to wildcard IP instead", requestedAddress);
+                transport.open(port, "");
             }
+            server = transport;
         } catch (BindException e) {
-            Voicechat.LOGGER.error("Failed to run voice chat at UDP port {}, make sure no other application is running at that port", port);
+            transport.close();
+            Voicechat.LOGGER.error("Failed to run voice chat at TCP port {}, make sure no other application is running at that port", port);
             Voicechat.LOGGER.error("Voice chat server error", e);
             if (dedicated) {
                 Voicechat.LOGGER.error("Shutting down server");
@@ -79,44 +84,49 @@ public class VoicechatSocketImpl extends VoicechatSocketBase implements Voicecha
 
     @Override
     public RawUdpPacket read() throws Exception {
-        if (socket == null) {
+        TcpServer current = server;
+        if (current == null) {
             throw new IllegalStateException("Socket not opened yet");
         }
-        return read(socket);
+        TcpServer.ReceivedPacket packet = current.read();
+        return new RawUdpPacketImpl(packet.data(), packet.address(), packet.timestamp());
     }
 
     @Override
     public void send(byte[] data, SocketAddress address) throws Exception {
-        if (socket == null || socket.isClosed()) {
-            return; // Ignoring packet sending when socket isn't open yet or already closed
+        TcpServer current = server;
+        if (current == null || current.isClosed()) {
+            return;
         }
-        socket.send(new DatagramPacket(data, data.length, address));
+        current.send(data, address);
+    }
+
+    @Override
+    public void closeConnection(SocketAddress address) {
+        TcpServer current = server;
+        if (current != null) {
+            current.closeConnection(address);
+        }
     }
 
     @Override
     public int getLocalPort() {
-        if (socket == null) {
-            return -1;
-        }
-        return socket.getLocalPort();
+        TcpServer current = server;
+        return current == null ? -1 : current.getLocalPort();
     }
 
     @Override
-    public void close() {
-        if (socket != null) {
-            try {
-                socket.close();
-            } catch (Throwable ignored) {
-                // Apparently some JDKs throw an "Error" when closing a datagram socket
-            }
+    public synchronized void close() {
+        TcpServer current = server;
+        server = null;
+        if (current != null) {
+            current.close();
         }
     }
 
     @Override
     public boolean isClosed() {
-        if (socket == null) {
-            return true;
-        }
-        return socket.isClosed();
+        TcpServer current = server;
+        return current == null || current.isClosed();
     }
 }
