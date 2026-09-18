@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "voicechat",
   "version": "${mod_version}",
-  "name": "Simple Voice Chat",
+  "name": "Simple Voice Chat TCP",
   "description": "A working voice chat in Minecraft!",
   "authors": [
     "Max Henkel"
