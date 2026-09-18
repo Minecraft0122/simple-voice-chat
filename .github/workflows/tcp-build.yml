@@ -1,0 +1,54 @@
+name: Build TCP voice chat
+
+on:
+  push:
+    branches: ['tcp/26.*']
+  pull_request:
+    branches: ['tcp/26.*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  transport:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+      - name: Run real TCP transport regressions
+        run: bash scripts/test-tcp.sh
+
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+      - uses: gradle/actions/setup-gradle@v6
+      - name: Build supported platforms
+        shell: bash
+        run: |
+          tasks=(:fabric:build :paper:build :neoforge:build)
+          if ! grep -q '^minecraft_version=26.3' gradle.properties; then
+            tasks+=(:forge:build)
+          fi
+          bash gradlew "${tasks[@]}" --console=plain
+      - uses: actions/upload-artifact@v4
+        with:
+          name: simple-voice-chat-tcp
+          if-no-files-found: error
+          path: |
+            fabric/build/libs/*.jar
+            paper/build/libs/*.jar
+            neoforge/build/libs/*.jar
+            forge/build/libs/*.jar
+            !**/*-sources.jar
+            !**/*-javadoc.jar
+            !**/*-dev.jar

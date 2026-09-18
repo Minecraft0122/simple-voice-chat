@@ -121,7 +121,7 @@ public class PaperCommonCompatibilityManager extends CommonCompatibilityManager 
 
     @Override
     public String getModName() {
-        return "Simple Voice Chat";
+        return "Simple Voice Chat TCP";
     }
 
     @Override
