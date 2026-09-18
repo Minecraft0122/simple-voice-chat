@@ -6,19 +6,23 @@ import de.maxhenkel.voicechat.debug.VoicechatUncaughtExceptionHandler;
 import de.maxhenkel.voicechat.intercompatibility.ClientCompatibilityManager;
 import de.maxhenkel.voicechat.plugins.ClientPluginManager;
 import de.maxhenkel.voicechat.voice.common.*;
+import net.minecraft.client.Minecraft;
 
+import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.net.SocketAddress;
 
 public class ClientVoicechatConnection extends Thread {
 
-    private ClientVoicechat client;
+    private final ClientVoicechat client;
     private final InitializationData data;
     private final ClientVoicechatSocket socket;
     private final InetAddress address;
-    private boolean running;
-    private boolean authenticated;
-    private boolean connected;
+    private volatile boolean running;
+    private volatile boolean authenticated;
+    private volatile boolean connected;
+    private boolean disconnectEventEmitted;
     private final AuthThread authThread;
     private long lastKeepAlive;
 
@@ -30,7 +34,6 @@ public class ClientVoicechatConnection extends Thread {
         this.lastKeepAlive = -1;
         this.running = true;
         this.authThread = new AuthThread();
-        this.authThread.start();
         setDaemon(true);
         setName("VoiceChatConnectionThread");
         setUncaughtExceptionHandler(new VoicechatUncaughtExceptionHandler());
@@ -55,6 +58,10 @@ public class ClientVoicechatConnection extends Thread {
 
     @Override
     public void run() {
+        // TCP sockets are connected lazily by the first authentication packet.
+        // Starting auth after this thread starts keeps connection ownership and
+        // the packet reader in a single lifecycle.
+        authThread.start();
         try {
             while (running) {
                 NetworkMessage in = ClientNetworkMessage.readPacketClient(socket.read(), this);
@@ -85,17 +92,34 @@ public class ClientVoicechatConnection extends Thread {
         } catch (InterruptedException ignored) {
         } catch (Exception e) {
             if (running) {
-                Voicechat.LOGGER.error("Failed to process packet from server", e);
+                failConnection(e);
             }
         }
     }
 
     public void close() {
-        Voicechat.LOGGER.info("Disconnecting voicechat");
-        running = false;
+        disconnect(false);
+    }
 
+    private void disconnect(boolean emitEvent) {
+        boolean closeSocket;
+        boolean emit;
+        synchronized (this) {
+            closeSocket = running || !socket.isClosed();
+            emit = emitEvent && !disconnectEventEmitted;
+            running = false;
+            authenticated = false;
+            connected = false;
+            disconnectEventEmitted = true;
+        }
+        if (closeSocket) {
+            Voicechat.LOGGER.info("Disconnecting voicechat");
+        }
         socket.close();
         authThread.close();
+        if (emit && closeSocket) {
+            Minecraft.getInstance().execute(() -> ClientCompatibilityManager.INSTANCE.emitVoiceChatDisconnectedEvent());
+        }
     }
 
     public boolean isConnected() {
@@ -103,28 +127,40 @@ public class ClientVoicechatConnection extends Thread {
     }
 
     public boolean sendToServer(NetworkMessage message) {
-        if (!isConnected()) {
+        if (!running || socket.isClosed()) {
             return false; // Ignore sending packets when connection is closed
         }
         try {
-            socket.send(ClientNetworkMessage.writeClient(this, message), new InetSocketAddress(address, data.getServerPort()));
+            SocketAddress destination = new InetSocketAddress(address, data.getServerPort());
+            socket.send(ClientNetworkMessage.writeClient(this, message), destination);
             return true;
         } catch (Exception e) {
             Voicechat.LOGGER.error("Failed to send voice chat packet - Disconnecting", e);
-            disconnect();
+            failConnection(e);
             return false;
         }
+    }
+
+    private void failConnection(Exception cause) {
+        synchronized (this) {
+            if (!running || disconnectEventEmitted) {
+                return;
+            }
+        }
+        Voicechat.LOGGER.error("Voice chat transport failed - Disconnecting", cause);
+        disconnect(false);
+        client.scheduleReconnect(this);
     }
 
     public void checkTimeout() {
         if (lastKeepAlive >= 0 && System.currentTimeMillis() - lastKeepAlive > data.getKeepAlive() * 10L) {
             Voicechat.LOGGER.info("Connection timeout");
-            disconnect();
+            failConnection(new IOException("Voice chat keep-alive timed out"));
         }
     }
 
     public void disconnect() {
-        ClientCompatibilityManager.INSTANCE.emitVoiceChatDisconnectedEvent();
+        disconnect(true);
     }
 
     private class AuthThread extends Thread {
@@ -155,7 +191,9 @@ public class ClientVoicechatConnection extends Thread {
                         Voicechat.LOGGER.warn("Trying to authenticate voice chat connection (this message will not be logged again)");
                         authLogMessageCount++;
                     }
-                    sendToServer(new NetworkMessage(new AuthenticatePacket(data.getPlayerUUID(), data.getSecret())));
+                    if (!sendToServer(new NetworkMessage(new AuthenticatePacket(data.getPlayerUUID(), data.getSecret())))) {
+                        break;
+                    }
                 } else {
                     authLogMessageCount = 0;
                     if (validateLogMessageCount < 10) {
@@ -165,7 +203,9 @@ public class ClientVoicechatConnection extends Thread {
                         Voicechat.LOGGER.warn("Trying to validate voice chat connection (this message will not be logged again)");
                         validateLogMessageCount++;
                     }
-                    sendToServer(new NetworkMessage(new ConnectionCheckPacket()));
+                    if (!sendToServer(new NetworkMessage(new ConnectionCheckPacket()))) {
+                        break;
+                    }
                 }
 
                 Utils.sleep(1000);

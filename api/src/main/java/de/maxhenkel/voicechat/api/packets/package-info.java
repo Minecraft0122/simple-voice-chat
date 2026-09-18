@@ -1,4 +1,4 @@
 /**
- * All voice chat UDP packets.
+ * All voice chat packets (carried by framed TCP in this fork).
  */
 package de.maxhenkel.voicechat.api.packets;

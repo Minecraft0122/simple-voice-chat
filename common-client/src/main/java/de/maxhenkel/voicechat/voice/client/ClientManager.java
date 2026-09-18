@@ -153,21 +153,9 @@ public class ClientManager {
         if (server == null) {
             return;
         }
-        try {
-            Voicechat.LOGGER.info("Changing voice chat port to {}", port);
-            server.changePort(port);
-            ClientVoicechat client = ClientManager.getClient();
-            if (client != null) {
-                ClientVoicechatConnection connection = client.getConnection();
-                if (connection != null) {
-                    Voicechat.LOGGER.info("Force disconnecting due to port change");
-                    connection.disconnect();
-                }
-            }
-            ClientServerNetManager.sendToServer(new RequestSecretPacket(Voicechat.COMPATIBILITY_VERSION));
-        } catch (Exception e) {
-            Voicechat.LOGGER.error("Failed to change voice chat port", e);
-        }
+        // Minecraft has already bound its TCP port. Keep the separate voice listener
+        // and existing connections when publishing the world to LAN.
+        Voicechat.LOGGER.info("LAN voice chat uses TCP port {} (Minecraft port {})", server.getPort(), port);
         Component portComponent = ComponentUtils.copyOnClickText(String.valueOf(server.getPort()));
         Minecraft mc = Minecraft.getInstance();
         mc.execute(() -> mc.gui.getChat().addClientSystemMessage(Component.translatable("message.voicechat.server_port", portComponent)));
