@@ -33,11 +33,11 @@ public class ServerConfig {
         voiceChatPort = builder
                 .integerEntry("port", 24454, -1, 65535,
                         "The port number to use for the voice chat communication.",
-                        "Audio packets are always transmitted via the UDP protocol on the port number",
+                        "Audio packets are always transmitted via the TCP protocol on the port number",
                         "specified here, independently of other networking used for the game server.",
-                        "Set this to '-1' to use the same port number that is used by the Minecraft server.",
-                        "However, it is strongly recommended NOT to use the same port number because UDP on",
-                        "it is also used by default for the server query. Doing so may crash the server!"
+                        "Use a separate port from the Minecraft server and forward it as TCP.",
+                        "The legacy value '-1' uses 24454; sharing the game TCP port is not supported.",
+                        "Set this to '0' to let the operating system select an available TCP port."
                 );
         voiceChatBindAddress = builder
                 .stringEntry("bind_address", "",

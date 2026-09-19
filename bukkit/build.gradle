@@ -114,6 +114,7 @@ compileJava.dependsOn generateFallbackTranslations
 
 sourceSets.main.java {
     srcDir "${layout.buildDirectory.asFile.get()}/generated/java"
+    srcDir project(':common').file('src/main/java/de/maxhenkel/voicechat/voice/transport')
 }
 
 shadowJar {

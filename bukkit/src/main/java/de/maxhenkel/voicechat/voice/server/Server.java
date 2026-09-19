@@ -50,17 +50,20 @@ public class Server extends Thread {
     public Server() {
         int configPort = Voicechat.SERVER_CONFIG.voiceChatPort.get();
         if (configPort < 0) {
-            Voicechat.LOGGER.info("Using the Minecraft servers port as voice chat port");
-            port = Bukkit.getPort();
+            Voicechat.LOGGER.warn("The TCP voice chat cannot share the Minecraft port; using voice port 24454 for legacy port=-1");
+            port = 24454;
         } else {
             port = configPort;
+        }
+        if (port != 0 && port == Bukkit.getPort()) {
+            throw new IllegalArgumentException("TCP voice chat needs a port different from the Minecraft server port. Change port in voicechat-server.properties.");
         }
         this.server = Bukkit.getServer();
         socket = PluginManager.instance().getSocketImplementation();
         connections = new ConcurrentHashMap<>();
         unCheckedConnections = new ConcurrentHashMap<>();
         secrets = new ConcurrentHashMap<>();
-        packetQueue = new LinkedBlockingQueue<>();
+        packetQueue = new LinkedBlockingQueue<>(4096);
         pingManager = new PingManager(this);
         playerStateManager = new PlayerStateManager();
         groupManager = new ServerGroupManager();
@@ -93,7 +96,11 @@ public class Server extends Thread {
 
             while (!socket.isClosed()) {
                 try {
-                    packetQueue.add(socket.read());
+                    RawUdpPacket packet = socket.read();
+                    if (!packetQueue.offer(packet)) {
+                        socket.closeConnection(packet.getSocketAddress());
+                        Voicechat.LOGGER.warn("TCP voice packet queue is full; closing the sending connection");
+                    }
                 } catch (Exception e) {
                     // Only log an error if the error isn't caused by the socket being closed
                     if (!(e instanceof SocketException && e.getCause() instanceof AsynchronousCloseException)) {
@@ -164,8 +171,10 @@ public class Server extends Thread {
     }
 
     public void disconnectClient(UUID playerUUID) {
-        connections.remove(playerUUID);
-        unCheckedConnections.remove(playerUUID);
+        ClientConnection checked = connections.remove(playerUUID);
+        ClientConnection unchecked = unCheckedConnections.remove(playerUUID);
+        if (checked != null) socket.closeConnection(checked.getAddress());
+        if (unchecked != null) socket.closeConnection(unchecked.getAddress());
         secrets.remove(playerUUID);
         PluginManager.instance().onPlayerDisconnected(playerUUID);
     }
@@ -239,7 +248,12 @@ public class Server extends Thread {
                             if (connection == null) {
                                 connection = connections.get(packet.getPlayerUUID());
                             }
-                            if (connection == null) {
+                            if (connection == null || !connection.getAddress().equals(message.getAddress())) {
+                                if (connection != null) socket.closeConnection(connection.getAddress());
+                                ClientConnection old = connections.remove(packet.getPlayerUUID());
+                                if (old != null) socket.closeConnection(old.getAddress());
+                                old = unCheckedConnections.remove(packet.getPlayerUUID());
+                                if (old != null) socket.closeConnection(old.getAddress());
                                 connection = new ClientConnection(packet.getPlayerUUID(), message.getAddress());
                                 unCheckedConnections.put(packet.getPlayerUUID(), connection);
                                 Voicechat.LOGGER.info("Successfully authenticated player {}", packet.getPlayerUUID());
