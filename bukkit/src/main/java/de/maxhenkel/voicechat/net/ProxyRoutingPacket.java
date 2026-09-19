@@ -21,12 +21,13 @@ public class ProxyRoutingPacket implements Packet<ProxyRoutingPacket> {
     private float whisperDistance;
     private List<UUID> normalTargets = List.of();
     private List<UUID> whisperTargets = List.of();
+    private List<UUID> groupTargets = List.of();
 
     public ProxyRoutingPacket() {
     }
 
     public ProxyRoutingPacket(UUID playerUUID, long generation, long updateSequence, boolean connected, float normalDistance, float whisperDistance,
-                              List<UUID> normalTargets, List<UUID> whisperTargets) {
+                              List<UUID> normalTargets, List<UUID> whisperTargets, List<UUID> groupTargets) {
         this.playerUUID = playerUUID;
         this.generation = generation;
         this.updateSequence = updateSequence;
@@ -35,6 +36,7 @@ public class ProxyRoutingPacket implements Packet<ProxyRoutingPacket> {
         this.whisperDistance = whisperDistance;
         this.normalTargets = List.copyOf(normalTargets);
         this.whisperTargets = List.copyOf(whisperTargets);
+        this.groupTargets = List.copyOf(groupTargets);
     }
 
     public UUID getPlayerUUID() {
@@ -69,6 +71,10 @@ public class ProxyRoutingPacket implements Packet<ProxyRoutingPacket> {
         return whisperTargets;
     }
 
+    public List<UUID> getGroupTargets() {
+        return groupTargets;
+    }
+
     @Override
     public Key getID() {
         return PROXY_ROUTING;
@@ -84,6 +90,7 @@ public class ProxyRoutingPacket implements Packet<ProxyRoutingPacket> {
         whisperDistance = buf.readFloat();
         normalTargets = readTargets(buf);
         whisperTargets = readTargets(buf);
+        groupTargets = readTargets(buf);
         return this;
     }
 
@@ -97,7 +104,7 @@ public class ProxyRoutingPacket implements Packet<ProxyRoutingPacket> {
 
     @Override
     public void toBytes(FriendlyByteBuf buf) {
-        if (normalTargets.size() > MAX_TARGETS || whisperTargets.size() > MAX_TARGETS) {
+        if (normalTargets.size() > MAX_TARGETS || whisperTargets.size() > MAX_TARGETS || groupTargets.size() > MAX_TARGETS) {
             throw new IllegalArgumentException("Too many proxy routing targets");
         }
         buf.writeUUID(playerUUID);
@@ -108,6 +115,7 @@ public class ProxyRoutingPacket implements Packet<ProxyRoutingPacket> {
         buf.writeFloat(whisperDistance);
         writeTargets(buf, normalTargets);
         writeTargets(buf, whisperTargets);
+        writeTargets(buf, groupTargets);
     }
 
     private static void writeTargets(FriendlyByteBuf buf, List<UUID> targets) {

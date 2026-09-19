@@ -35,6 +35,8 @@ public class VoiceProxySniffer {
     private final Map<UUID, RoutingState> routingStateMap = new ConcurrentHashMap<>();
     private final Map<UUID, Long> routingGenerationMap = new ConcurrentHashMap<>();
     private final Map<UUID, Long> routingSequenceMap = new ConcurrentHashMap<>();
+    private final Map<UUID, Long> routingTimestampMap = new ConcurrentHashMap<>();
+    private static final long ROUTING_STATE_TIMEOUT_MILLIS = 3_000L;
 
     private final VoiceProxy voiceProxy;
 
@@ -113,6 +115,7 @@ public class VoiceProxySniffer {
         routingStateMap.remove(playerUUID);
         routingGenerationMap.remove(playerUUID);
         routingSequenceMap.remove(playerUUID);
+        routingTimestampMap.remove(playerUUID);
     }
 
     /**
@@ -129,12 +132,20 @@ public class VoiceProxySniffer {
         SniffedSecretPacket packet = SniffedSecretPacket.fromBytes(message, compatibilityVersion);
         playerUUIDMap.put(packet.getPlayerUUID(), playerUUID);
         secretMap.put(playerUUID, packet.getSecret());
+        routingStateMap.remove(playerUUID);
+        routingGenerationMap.remove(playerUUID);
+        routingSequenceMap.remove(playerUUID);
+        routingTimestampMap.remove(playerUUID);
 
-        InetSocketAddress backendSocket = createBackendSocket(playerUUID, packet.getServerPort());
-        if (backendSocket == null) {
-            resetBackendSocket(playerUUID);
+        if (packet.getServerPort() > 0 && packet.getServerPort() <= 65535) {
+            InetSocketAddress backendSocket = createBackendSocket(playerUUID, packet.getServerPort());
+            if (backendSocket == null) {
+                resetBackendSocket(playerUUID);
+            } else {
+                backendSocketMap.put(playerUUID, backendSocket);
+            }
         } else {
-            backendSocketMap.put(playerUUID, backendSocket);
+            resetBackendSocket(playerUUID);
         }
 
         // The player reconnects with a new socket, so the bridge of the previous session is outdated
@@ -163,11 +174,17 @@ public class VoiceProxySniffer {
         boolean connected = data.get() != 0;
         float normalDistance = data.getFloat();
         float whisperDistance = data.getFloat();
+        if (!Float.isFinite(normalDistance) || !Float.isFinite(whisperDistance)
+                || normalDistance < 0F || whisperDistance < 0F) {
+            throw new IllegalArgumentException("Invalid proxy routing distance");
+        }
         List<UUID> normalTargets = readUUIDs(data);
         List<UUID> whisperTargets = readUUIDs(data);
+        List<UUID> groupTargets = readUUIDs(data);
         routingGenerationMap.put(mappedPlayer, generation);
         routingSequenceMap.put(mappedPlayer, updateSequence);
-        routingStateMap.put(mappedPlayer, new RoutingState(mappedPlayer, connected, normalDistance, whisperDistance, normalTargets, whisperTargets));
+        routingTimestampMap.put(mappedPlayer, System.currentTimeMillis());
+        routingStateMap.put(mappedPlayer, new RoutingState(mappedPlayer, connected, normalDistance, whisperDistance, normalTargets, whisperTargets, groupTargets));
     }
 
     private static UUID readUUID(ByteBuffer buffer) {
@@ -205,15 +222,16 @@ public class VoiceProxySniffer {
 
     public RoutingState getRoutingState(UUID playerUUID) {
         RoutingState state = routingStateMap.get(playerUUID);
-        if (state == null) return null;
+        Long updatedAt = routingTimestampMap.get(playerUUID);
+        if (state == null || updatedAt == null || System.currentTimeMillis() - updatedAt > ROUTING_STATE_TIMEOUT_MILLIS) return null;
         return state.mapTargets(this);
     }
 
     public record RoutingState(UUID playerUUID, boolean connected, float normalDistance, float whisperDistance,
-                               List<UUID> normalTargets, List<UUID> whisperTargets) {
+                               List<UUID> normalTargets, List<UUID> whisperTargets, List<UUID> groupTargets) {
         private RoutingState mapTargets(VoiceProxySniffer sniffer) {
             return new RoutingState(playerUUID, connected, normalDistance, whisperDistance,
-                    map(normalTargets, sniffer), map(whisperTargets, sniffer));
+                    map(normalTargets, sniffer), map(whisperTargets, sniffer), map(groupTargets, sniffer));
         }
 
         private static List<UUID> map(List<UUID> targets, VoiceProxySniffer sniffer) {

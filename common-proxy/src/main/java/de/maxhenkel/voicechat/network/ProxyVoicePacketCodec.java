@@ -14,6 +14,7 @@ final class ProxyVoicePacketCodec {
     private static final byte MAGIC = (byte) 0xFF;
     private static final byte MIC_PACKET = 0x01;
     private static final byte PLAYER_SOUND_PACKET = 0x02;
+    private static final byte GROUP_SOUND_PACKET = 0x03;
     private static final byte AUTHENTICATE_PACKET = 0x05;
     private static final byte AUTHENTICATE_ACK_PACKET = 0x06;
     private static final byte CONNECTION_CHECK_PACKET = 0x09;
@@ -21,7 +22,7 @@ final class ProxyVoicePacketCodec {
     private static final int SECRET_SIZE = 16;
     private static final int IV_SIZE = 12;
     private static final int TAG_SIZE = 16;
-    private static final int MAX_AUDIO_SIZE = 2048;
+    private static final int MAX_AUDIO_SIZE = 1275;
     private static final SecureRandom RANDOM = new SecureRandom();
 
     private ProxyVoicePacketCodec() {
@@ -60,6 +61,9 @@ final class ProxyVoicePacketCodec {
         if (type == CONNECTION_CHECK_PACKET) {
             return new DecodedPacket(player, type, null, 0L, false, null);
         }
+        if (type == 0x07 || type == 0x08) {
+            return new DecodedPacket(player, type, null, 0L, false, null);
+        }
         throw new IllegalArgumentException("Unsupported proxy voice packet type: " + type);
     }
 
@@ -87,6 +91,18 @@ final class ProxyVoicePacketCodec {
         payload.putLong(sequence);
         payload.putFloat(distance);
         payload.put((byte) (whispering ? 1 : 0));
+        return encodePayload(secret, Arrays.copyOf(payload.array(), payload.position()));
+    }
+
+    static byte[] encodeGroupSound(byte[] secret, UUID channelId, UUID sender, byte[] audio, long sequence) throws Exception {
+        if (audio == null || audio.length > MAX_AUDIO_SIZE) throw new IllegalArgumentException("Audio payload is too large");
+        ByteBuffer payload = ByteBuffer.allocate(1 + 16 + 16 + 5 + audio.length + 8 + 1);
+        payload.put(GROUP_SOUND_PACKET);
+        putUUID(payload, channelId);
+        putUUID(payload, sender);
+        putBytes(payload, audio);
+        payload.putLong(sequence);
+        payload.put((byte) 0);
         return encodePayload(secret, Arrays.copyOf(payload.array(), payload.position()));
     }
 

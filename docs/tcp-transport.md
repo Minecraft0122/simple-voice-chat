@@ -54,7 +54,9 @@ player's connected state, distances and target UUIDs. Each update also carries a
 backend generation and monotonic update sequence so stale switch/reconnect state is
 ignored. The proxy owns the public TCP
 listener, authenticates clients, decrypts each microphone packet, applies the backend
-routing state and encrypts a `PlayerSoundPacket` separately for each target. This removes
+routing state and encrypts a `PlayerSoundPacket` or `GroupSoundPacket` separately for each
+target. Group members are kept in a separate target set so group audio is not duplicated as
+proximity audio. This removes
 the per-player audio stream between the proxy and every backend server. Backends must be
 connected to the same proxy and must use the matching 26.3 fork.
 

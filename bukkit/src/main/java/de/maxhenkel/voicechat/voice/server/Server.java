@@ -7,6 +7,7 @@ import de.maxhenkel.voicechat.api.events.SoundPacketEvent;
 import de.maxhenkel.voicechat.debug.CooldownTimer;
 import de.maxhenkel.voicechat.debug.VoicechatUncaughtExceptionHandler;
 import de.maxhenkel.voicechat.net.NetManager;
+import de.maxhenkel.voicechat.net.ProxyRoutingPacket;
 import de.maxhenkel.voicechat.permission.PermissionManager;
 import de.maxhenkel.voicechat.plugins.PluginManager;
 import de.maxhenkel.voicechat.voice.common.*;
@@ -223,7 +224,11 @@ public class Server extends Thread {
             while (running) {
                 try {
                     if (Voicechat.SERVER_CONFIG.proxyMode.get()) {
-                        sendProxyRoutingStates();
+                        long now = System.currentTimeMillis();
+                        if (now - lastProxyRoutingUpdate >= 250L) {
+                            lastProxyRoutingUpdate = now;
+                            Voicechat.compatibility.runTask(this::sendProxyRoutingStates);
+                        }
                         Thread.sleep(50L);
                         continue;
                     }
@@ -332,21 +337,19 @@ public class Server extends Thread {
     }
 
     private void sendProxyRoutingStates() {
-        long now = System.currentTimeMillis();
-        if (now - lastProxyRoutingUpdate < 250L) return;
-        lastProxyRoutingUpdate = now;
-
         for (Player sender : Bukkit.getOnlinePlayers()) {
             PlayerState state = playerStateManager.getState(sender.getUniqueId());
             if (state == null || !Voicechat.SERVER.isCompatible(sender)) continue;
-            boolean connected = !state.isDisconnected() && !state.isDisabled();
+            boolean connected = !state.isDisconnected() && !state.isDisabled()
+                    && sender.hasPermission(PermissionManager.SPEAK_PERMISSION);
             List<UUID> normal = connected ? getProxyTargets(sender, false) : List.of();
             List<UUID> whisper = connected ? getProxyTargets(sender, true) : List.of();
+            List<UUID> group = connected ? getProxyGroupTargets(sender) : List.of();
             NetManager.sendToClient(sender, new ProxyRoutingPacket(
                     sender.getUniqueId(), proxyRoutingGeneration, ++proxyRoutingSequence, connected,
                     Voicechat.SERVER_CONFIG.voiceChatDistance.get().floatValue(),
                     Voicechat.SERVER_CONFIG.whisperDistance.get().floatValue(),
-                    normal, whisper
+                    normal, whisper, group
             ));
         }
     }
@@ -361,17 +364,36 @@ public class Server extends Thread {
         double maxDistanceSquared = distance * distance;
         List<UUID> targets = new ArrayList<>();
         for (Player receiver : Bukkit.getOnlinePlayers()) {
-            if (receiver.equals(sender) || !receiver.getWorld().equals(sender.getWorld())) continue;
+            if (receiver.equals(sender)) continue;
             PlayerState receiverState = playerStateManager.getState(receiver.getUniqueId());
             if (receiverState == null || receiverState.isDisconnected() || receiverState.isDisabled()) continue;
+            if (!receiver.hasPermission(PermissionManager.LISTEN_PERMISSION)) continue;
             if (!Voicechat.compatibility.canSee(receiver, sender)) continue;
             boolean sameGroup = senderState.hasGroup() && senderState.getGroup().equals(receiverState.getGroup());
+            if (sameGroup) continue;
+            if (!sameGroup && !receiver.getWorld().equals(sender.getWorld())) continue;
             @Nullable Group receiverGroup = receiverState.hasGroup() ? groupManager.getGroup(receiverState.getGroup()) : null;
             if (receiverGroup != null && receiverGroup.isIsolated() && !sameGroup) continue;
             if (!sameGroup && senderGroup != null && !senderGroup.isOpen()) continue;
             if (sameGroup || receiver.getLocation().distanceSquared(sender.getLocation()) <= maxDistanceSquared) {
                 targets.add(receiver.getUniqueId());
             }
+        }
+        return List.copyOf(targets);
+    }
+
+    private List<UUID> getProxyGroupTargets(Player sender) {
+        PlayerState senderState = playerStateManager.getState(sender.getUniqueId());
+        if (senderState == null || !senderState.hasGroup()) return List.of();
+        List<UUID> targets = new ArrayList<>();
+        for (Player receiver : Bukkit.getOnlinePlayers()) {
+            if (receiver.equals(sender)) continue;
+            PlayerState receiverState = playerStateManager.getState(receiver.getUniqueId());
+            if (receiverState == null || receiverState.isDisconnected() || receiverState.isDisabled()
+                    || !senderState.getGroup().equals(receiverState.getGroup())) continue;
+            if (!Voicechat.compatibility.canSee(receiver, sender)
+                    || !receiver.hasPermission(PermissionManager.LISTEN_PERMISSION)) continue;
+            targets.add(receiver.getUniqueId());
         }
         return List.copyOf(targets);
     }

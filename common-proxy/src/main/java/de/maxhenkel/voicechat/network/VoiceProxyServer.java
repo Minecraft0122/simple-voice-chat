@@ -1,6 +1,7 @@
 package de.maxhenkel.voicechat.network;
 
 import de.maxhenkel.voicechat.VoiceProxy;
+import de.maxhenkel.voicechat.sniffer.VoiceProxySniffer;
 
 import java.io.IOException;
 import java.net.BindException;
@@ -24,6 +25,7 @@ public class VoiceProxyServer extends Thread {
     private final Map<ProxyTcpConnection, UUID> connectionPlayers = new ConcurrentHashMap<>();
     private final Map<ProxyTcpConnection, Long> lastSequences = new ConcurrentHashMap<>();
     private volatile ServerSocket serverSocket;
+    private volatile Thread keepAliveThread;
 
     public VoiceProxyServer(VoiceProxy proxy) {
         setDaemon(true);
@@ -45,12 +47,15 @@ public class VoiceProxyServer extends Thread {
         playerConnections.clear();
         connectionPlayers.clear();
         lastSequences.clear();
+        Thread keepAlive = keepAliveThread;
+        if (keepAlive != null) keepAlive.interrupt();
     }
 
     @Override
     public void run() {
         try {
             serverSocket = openSocket();
+            keepAliveThread = Thread.ofVirtual().name("voicechat-proxy-keepalive").start(this::keepAliveLoop);
             while (!isInterrupted() && !serverSocket.isClosed()) {
                 try {
                     Socket socket = serverSocket.accept();
@@ -119,6 +124,26 @@ public class VoiceProxyServer extends Thread {
         }
     }
 
+    private void keepAliveLoop() {
+        try {
+            while (!isInterrupted()) {
+                Thread.sleep(1000L);
+                for (Map.Entry<ProxyTcpConnection, UUID> entry : connectionPlayers.entrySet()) {
+                    ProxyTcpConnection connection = entry.getKey();
+                    byte[] secret = voiceProxy.getSniffer().getSecret(entry.getValue());
+                    if (secret == null || connection.isClosed()) continue;
+                    try {
+                        connection.send(ProxyVoicePacketCodec.encodeControl(secret, (byte) 0x08));
+                    } catch (Exception e) {
+                        disconnect(entry.getValue());
+                    }
+                }
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
     private void handlePacket(byte[] raw, ProxyTcpConnection connection) throws Exception {
         UUID backendUUID = readPlayerUUID(raw);
         if (isPing(raw, backendUUID)) {
@@ -139,13 +164,17 @@ public class VoiceProxyServer extends Thread {
             }
             ProxyTcpConnection old = playerConnections.put(playerUUID, connection);
             if (old != null && old != connection) old.close();
-            connectionPlayers.put(connection, playerUUID);
+            UUID previousPlayer = connectionPlayers.put(connection, playerUUID);
+            if (previousPlayer != null && !previousPlayer.equals(playerUUID)) {
+                playerConnections.remove(previousPlayer, connection);
+            }
             lastSequences.remove(connection);
             connection.send(ProxyVoicePacketCodec.encodeControl(secret, (byte) 0x06));
             return;
         }
 
         if (!playerUUID.equals(connectionPlayers.get(connection))) return;
+        if (packet.type() == 0x08) return;
         if (packet.type() == 0x09) {
             connection.send(ProxyVoicePacketCodec.encodeControl(secret, (byte) 0x0A));
             return;
@@ -158,6 +187,18 @@ public class VoiceProxyServer extends Thread {
 
         VoiceProxySniffer.RoutingState state = voiceProxy.getSniffer().getRoutingState(playerUUID);
         if (state == null || !state.connected()) return;
+        for (UUID target : state.groupTargets()) {
+            if (target.equals(playerUUID)) continue;
+            ProxyTcpConnection targetConnection = playerConnections.get(target);
+            byte[] targetSecret = voiceProxy.getSniffer().getSecret(target);
+            if (targetConnection == null || targetSecret == null || targetConnection.isClosed()) continue;
+            try {
+                targetConnection.send(ProxyVoicePacketCodec.encodeGroupSound(
+                        targetSecret, playerUUID, playerUUID, packet.audio(), packet.sequence()));
+            } catch (IOException e) {
+                disconnect(target);
+            }
+        }
         for (UUID target : packet.whispering() ? state.whisperTargets() : state.normalTargets()) {
             if (target.equals(playerUUID)) continue;
             ProxyTcpConnection targetConnection = playerConnections.get(target);
@@ -169,7 +210,7 @@ public class VoiceProxyServer extends Thread {
                         packet.whispering(), packet.whispering() ? state.whisperDistance() : state.normalDistance()
                 ));
             } catch (IOException e) {
-                closePlayer(target);
+                disconnect(target);
             }
         }
     }

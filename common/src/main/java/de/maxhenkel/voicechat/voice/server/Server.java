@@ -305,7 +305,11 @@ public class Server extends Thread {
             while (running) {
                 try {
                     if (Voicechat.SERVER_CONFIG.proxyMode.get()) {
-                        sendProxyRoutingStates();
+                        long now = System.currentTimeMillis();
+                        if (now - lastProxyRoutingUpdate >= 250L) {
+                            lastProxyRoutingUpdate = now;
+                            server.execute(this::sendProxyRoutingStates);
+                        }
                         Thread.sleep(50L);
                         continue;
                     }
@@ -410,26 +414,21 @@ public class Server extends Thread {
     }
 
     private void sendProxyRoutingStates() {
-        long now = System.currentTimeMillis();
-        if (now - lastProxyRoutingUpdate < 250L) {
-            return;
-        }
-        lastProxyRoutingUpdate = now;
-
         for (ServerPlayer sender : server.getPlayerList().getPlayers()) {
             PlayerState state = playerStateManager.getState(sender.getUUID());
             if (state == null || !Voicechat.SERVER.isCompatible(sender)) {
                 continue;
             }
-
-            boolean connected = !state.isDisconnected() && !state.isDisabled();
+            boolean connected = !state.isDisconnected() && !state.isDisabled()
+                    && PermissionManager.INSTANCE.SPEAK_PERMISSION.hasPermission(sender);
             List<UUID> normalTargets = connected ? getProxyTargets(sender, false) : List.of();
             List<UUID> whisperTargets = connected ? getProxyTargets(sender, true) : List.of();
+            List<UUID> groupTargets = connected ? getProxyGroupTargets(sender) : List.of();
             NetManager.sendToClient(sender, new ProxyRoutingPacket(
                     sender.getUUID(), proxyRoutingGeneration, ++proxyRoutingSequence, connected,
                     Voicechat.SERVER_CONFIG.voiceChatDistance.get().floatValue(),
                     Voicechat.SERVER_CONFIG.whisperDistance.get().floatValue(),
-                    normalTargets, whisperTargets
+                    normalTargets, whisperTargets, groupTargets
             ));
         }
     }
@@ -449,11 +448,14 @@ public class Server extends Thread {
         List<UUID> targets = new ArrayList<>();
 
         for (ServerPlayer receiver : server.getPlayerList().getPlayers()) {
-            if (receiver == sender || receiver.level() != sender.level()) {
+            if (receiver == sender) {
                 continue;
             }
             PlayerState receiverState = playerStateManager.getState(receiver.getUUID());
             if (receiverState == null || receiverState.isDisconnected() || receiverState.isDisabled()) {
+                continue;
+            }
+            if (!PermissionManager.INSTANCE.LISTEN_PERMISSION.hasPermission(receiver)) {
                 continue;
             }
             if (!CommonCompatibilityManager.INSTANCE.canSee(receiver, sender)) {
@@ -461,6 +463,12 @@ public class Server extends Thread {
             }
 
             boolean sameGroup = senderState.hasGroup() && senderState.getGroup().equals(receiverState.getGroup());
+            if (sameGroup) {
+                continue;
+            }
+            if (!sameGroup && receiver.level() != sender.level()) {
+                continue;
+            }
             @Nullable Group receiverGroup = receiverState.hasGroup() ? groupManager.getGroup(receiverState.getGroup()) : null;
             if (receiverGroup != null && receiverGroup.isIsolated() && !sameGroup) {
                 continue;
@@ -472,6 +480,22 @@ public class Server extends Thread {
             if (sameGroup || inRange) {
                 targets.add(receiver.getUUID());
             }
+        }
+        return List.copyOf(targets);
+    }
+
+    private List<UUID> getProxyGroupTargets(ServerPlayer sender) {
+        PlayerState senderState = playerStateManager.getState(sender.getUUID());
+        if (senderState == null || !senderState.hasGroup()) return List.of();
+        List<UUID> targets = new ArrayList<>();
+        for (ServerPlayer receiver : server.getPlayerList().getPlayers()) {
+            if (receiver == sender) continue;
+            PlayerState receiverState = playerStateManager.getState(receiver.getUUID());
+            if (receiverState == null || receiverState.isDisconnected() || receiverState.isDisabled()
+                    || !senderState.getGroup().equals(receiverState.getGroup())) continue;
+            if (!CommonCompatibilityManager.INSTANCE.canSee(receiver, sender)
+                    || !PermissionManager.INSTANCE.LISTEN_PERMISSION.hasPermission(receiver)) continue;
+            targets.add(receiver.getUUID());
         }
         return List.copyOf(targets);
     }
