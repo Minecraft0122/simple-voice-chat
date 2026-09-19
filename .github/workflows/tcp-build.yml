@@ -38,6 +38,8 @@ jobs:
           tasks=(:fabric:build :paper:build :neoforge:build)
           if ! grep -q '^minecraft_version=26.3' gradle.properties; then
             tasks+=(:forge:build)
+          else
+            tasks+=(:bukkit:build)
           fi
           bash gradlew "${tasks[@]}" --console=plain
       - uses: actions/upload-artifact@v4
@@ -47,6 +49,7 @@ jobs:
           path: |
             fabric/build/libs/*.jar
             paper/build/libs/*.jar
+            bukkit/build/libs/*.jar
             neoforge/build/libs/*.jar
             forge/build/libs/*.jar
             !**/*-sources.jar
