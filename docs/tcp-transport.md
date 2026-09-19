@@ -44,12 +44,13 @@ closes the listener and all client streams and unblocks a pending receive.
 
 ## Scope
 
-Fabric, NeoForge and Paper share the modified transport. Forge is additionally targeted
+Fabric, NeoForge, Bukkit and Paper share the modified transport. Forge is additionally targeted
 by the 26.1 and 26.2 branches; upstream's 26.3 branch has no 26.3 Forge implementation.
 The fork does not support the upstream UDP voice proxies or WebRTC transport. For a
-Minecraft proxy deployment, route the voice TCP port directly to the appropriate game
-server, or use an ordinary TCP forwarding service. Older Bukkit and proxy modules
-inherited on the 26.3 branch are excluded from the build.
+For Minecraft proxy deployment, route the voice TCP port directly to the appropriate game
+server, or use an ordinary TCP forwarding service. The Velocity/Bungee proxy modules
+inherited on the 26.3 branch remain UDP and are excluded from the supported build; the
+Bukkit server plugin is included and uses the same TCP transport as the mod platforms.
 
 TCP retransmission and ordering may increase latency on lossy connections. The
 transport retains upstream encryption; this is not TLS and introduces no claim of
