@@ -87,6 +87,7 @@ public class SimpleVoiceChatBungeecord extends VoiceProxy implements Listener {
         plugin.getProxy().registerChannel(REQUEST_SECRET_CHANNEL_1_12);
         plugin.getProxy().registerChannel(SECRET_CHANNEL);
         plugin.getProxy().registerChannel(SECRET_CHANNEL_1_12);
+        plugin.getProxy().registerChannel(PROXY_ROUTING_CHANNEL);
 
         plugin.getProxy().getPluginManager().registerCommand(plugin, new Command(VOICECHAT_COMMAND) {
             @Override
@@ -117,6 +118,7 @@ public class SimpleVoiceChatBungeecord extends VoiceProxy implements Listener {
         plugin.getProxy().unregisterChannel(REQUEST_SECRET_CHANNEL_1_12);
         plugin.getProxy().unregisterChannel(SECRET_CHANNEL);
         plugin.getProxy().unregisterChannel(SECRET_CHANNEL_1_12);
+        plugin.getProxy().unregisterChannel(PROXY_ROUTING_CHANNEL);
     }
 
     /**
@@ -170,7 +172,9 @@ public class SimpleVoiceChatBungeecord extends VoiceProxy implements Listener {
                 return;
             }
             event.setCancelled(true);
-            event.getReceiver().unsafe().sendPacket(new PluginMessage(event.getTag(), replacement.array(), true));
+            if (!event.getTag().equals(PROXY_ROUTING_CHANNEL)) {
+                event.getReceiver().unsafe().sendPacket(new PluginMessage(event.getTag(), replacement.array(), true));
+            }
         } catch (IncompatibleVoiceChatException e) {
             event.setCancelled(true);
             getLogger().info("Player {} has an incompatible voice chat version: {}", p.getName(), e.getMessage());

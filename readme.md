@@ -16,14 +16,14 @@
 
 1. 服务端安装本分支对应平台的模组；Paper 服务器将 Paper JAR 放入 `plugins/`。
 2. **所有玩家也必须安装本分支对应游戏版本的客户端模组**。仅替换服务器插件无法让原版客户端改用 TCP。
-3. 在 `config/voicechat/voicechat-server.properties`（Paper 为 `plugins/voicechat/voicechat-server.properties`）中设置 `port=24454`，并放行/转发 **24454/TCP**。
+3. 直连后端时，在 `config/voicechat/voicechat-server.properties`（Paper 为 `plugins/voicechat/voicechat-server.properties`）中设置 `port=24454`，并放行/转发 **24454/TCP**。
 4. 语音 TCP 端口必须与 Minecraft 游戏端口不同。旧配置 `port=-1` 会改用 `24454`；`port=0` 会选择空闲端口。
 5. 若使用端口映射或独立语音域名，将 `voice_host` 设为玩家可连接的 `域名:外部TCP端口`。
 
 局域网开放世界时保留自动分配的独立语音端口，游戏聊天栏会显示该端口。
-Minecraft 代理可以继续转发游戏连接，但语音必须直连后端或通过普通 TCP 端口转发。
-**不支持上游 UDP 语音代理（Velocity / BungeeCord）、UDP 检测工具或替换为 UDP 的第三方 socket 实现。**
-26.3 的 Bukkit/Paper 插件也使用 TCP；Velocity/BungeeCord 等上游 UDP 代理模块不在本分支支持范围。
+Minecraft 代理可以使用 26.3 分支内置的集中 TCP 语音代理。每个后端服都安装同一分支的服务端插件，并在其配置中设置 `proxy_mode=true`；后端不再监听玩家语音 TCP 连接，只通过 `voicechat:proxy_routing` 插件消息发送玩家状态、距离和目标 UUID。Velocity/BungeeCord 代理监听公共 `24454/TCP`，直接完成客户端认证、解密、路由和重新加密，后端之间不会转发音频流。
+代理配置文件为 `voicechat-proxy.properties`，至少确认 `port=24454`，并将玩家可访问的 `voice_host` 设置为代理地址。代理的游戏端口和语音端口必须不同。
+集中代理目前只在 `tcp/26.3` 分支提供；`tcp/26.1` 和 `tcp/26.2` 仍支持 TCP 后端直连/普通 TCP 转发。
 本分支的协议兼容编号为 `1020`，原版 UDP 客户端会收到版本不兼容提示。
 
 ## 构建与验证
@@ -34,15 +34,17 @@ Minecraft 代理可以继续转发游戏连接，但语音必须直连后端或�
 .\gradlew.bat :fabric:build :paper:build :neoforge:build
 # 仅 26.1 / 26.2：
 .\gradlew.bat :forge:build
-# 不需要下载 Minecraft 或 Gradle 依赖的真实 TCP 网络测试：
+# 不需要下载 Minecraft 或 Gradle 依赖的 TCP 和代理协议测试：
 pwsh -File scripts/test-tcp.ps1
+pwsh -File scripts/test-proxy.ps1
 ```
 
 产物位于各平台的 `build/libs/`，选择不带 `-sources` / `-javadoc` / `-dev` 后缀的模组或插件 JAR。
-Linux/macOS 可运行 `bash scripts/test-tcp.sh`。网络测试覆盖拆包、粘包、非法长度、并发发送、多客户端路由、关闭及重连。
+Linux/macOS 可运行 `bash scripts/test-tcp.sh` 和 `bash scripts/test-proxy.sh`。网络测试覆盖拆包、粘包、非法长度、并发发送、多客户端路由、关闭及重连；代理测试覆盖 AES-GCM 篡改检测和认证字段校验。
 协议和实现细节见 [docs/tcp-transport.md](docs/tcp-transport.md)。
 
 TCP 遇到丢包时会按顺序重传，因此网络不稳定时可能增加语音延迟。
+代理模式会让 Velocity/BungeeCord 成为语音明文的可信边界：代理必须能够读取每个玩家的 AES-GCM 密钥，才能按玩家目标转发后重新加密。当前仍使用 AES-GCM、随机 12 字节 IV 和 128 位认证标签；实现额外校验了密钥长度、密钥数组保护、短密文和代理侧 Mic 序号回退/重复。Minecraft 离线模式下的插件消息不能单独作为安全的密钥交换，仍应保护游戏连接和代理主机。
 分支保留上游授权和署名；以下为上游项目介绍，其中下载和文档链接指向原版项目。
 
 ---

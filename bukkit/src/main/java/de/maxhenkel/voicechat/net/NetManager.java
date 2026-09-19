@@ -30,6 +30,7 @@ public class NetManager implements Listener {
             registerIncomingPacket(LeaveGroupPacket.class);
 
             registerOutgoingPacket(SecretPacket.class);
+            registerOutgoingPacket(ProxyRoutingPacket.class);
             registerOutgoingPacket(PlayerStatesPacket.class);
             registerOutgoingPacket(PlayerStatePacket.class);
             registerOutgoingPacket(RemovePlayerStatePacket.class);

@@ -1,164 +1,223 @@
 package de.maxhenkel.voicechat.network;
 
 import de.maxhenkel.voicechat.VoiceProxy;
-import de.maxhenkel.voicechat.debug.PingHandler;
 
 import java.io.IOException;
 import java.net.BindException;
-import java.net.DatagramPacket;
-import java.net.DatagramSocket;
 import java.net.InetAddress;
-import java.net.SocketException;
+import java.net.InetSocketAddress;
+import java.net.ServerSocket;
+import java.net.Socket;
 import java.nio.ByteBuffer;
+import java.security.MessageDigest;
+import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
-/**
- * The VoiceProxyServer implements the publicly facing UDP server which then proxies
- * the UDP traffic to the appropriate backend server's Simple Voice Chat UDP server.
- */
+/** Central TCP voice endpoint. Audio is decrypted, routed and re-encrypted here. */
 public class VoiceProxyServer extends Thread {
 
-    /**
-     * The instance that created this VoiceProxyServer
-     */
+    private static final UUID PING_UUID = UUID.fromString("58bc9ae9-c7a8-45e4-a11c-efbb67199425");
+
     private final VoiceProxy voiceProxy;
-
-    /**
-     * Manages all the VoiceProxyBridge instances for this particular VoiceProxyServer
-     */
-    private final VoiceProxyBridgeManager voiceProxyBridgeManager;
-
-    /**
-     * The public UDP socket of the VoiceProxyServer. This is where Minecraft SimpleVoiceChat clients will connect to.
-     */
-    private volatile DatagramSocket socket;
+    private final Map<UUID, ProxyTcpConnection> playerConnections = new ConcurrentHashMap<>();
+    private final Map<ProxyTcpConnection, UUID> connectionPlayers = new ConcurrentHashMap<>();
+    private final Map<ProxyTcpConnection, Long> lastSequences = new ConcurrentHashMap<>();
+    private volatile ServerSocket serverSocket;
 
     public VoiceProxyServer(VoiceProxy proxy) {
         setDaemon(true);
         setName("VoiceProxyServer");
-
         voiceProxy = proxy;
-        voiceProxyBridgeManager = new VoiceProxyBridgeManager(voiceProxy, this);
     }
 
     @Override
     public void interrupt() {
         super.interrupt();
-        if (socket != null) {
-            socket.close();
+        ServerSocket listener = serverSocket;
+        if (listener != null) {
+            try {
+                listener.close();
+            } catch (IOException ignored) {
+            }
         }
+        playerConnections.values().forEach(ProxyTcpConnection::close);
+        playerConnections.clear();
+        connectionPlayers.clear();
+        lastSequences.clear();
     }
 
     @Override
     public void run() {
         try {
-            socket = openSocket();
-
-            while (!isInterrupted() && !socket.isClosed()) {
+            serverSocket = openSocket();
+            while (!isInterrupted() && !serverSocket.isClosed()) {
                 try {
-                    DatagramPacket packet = new DatagramPacket(new byte[4096], 4096);
-                    socket.receive(packet);
-                    handlePacket(packet);
-                } catch (Exception e) {
-                    if (!socket.isClosed()) {
-                        voiceProxy.getLogger().debug("An exception occurred while handling an incoming datagram", e);
+                    Socket socket = serverSocket.accept();
+                    ProxyTcpConnection connection = new ProxyTcpConnection(socket);
+                    Thread.ofVirtual().name("voicechat-proxy-tcp-reader").start(() -> readLoop(connection));
+                } catch (IOException e) {
+                    if (!serverSocket.isClosed()) {
+                        voiceProxy.getLogger().debug("An exception occurred while accepting a voice TCP connection", e);
                     }
                 }
             }
         } catch (Throwable e) {
             voiceProxy.getLogger().error("The voice chat proxy server encountered a fatal error and has been shut down", e);
         } finally {
-            // interrupt() might have run before the socket existed, so it has to be closed here
-            if (socket != null) {
-                socket.close();
-            }
-            // No packets are handled anymore, so no new bridges can be created from here on
-            voiceProxyBridgeManager.shutdown();
+            interrupt();
         }
     }
 
-    private DatagramSocket openSocket() throws SocketException {
+    private ServerSocket openSocket() throws IOException {
         int port = voiceProxy.getPort();
-
         String bindAddress = voiceProxy.getConfig().bindAddress.get();
         InetAddress address = null;
-        if (bindAddress.isEmpty()) {
+        if (bindAddress == null || bindAddress.isEmpty()) {
             address = voiceProxy.getDefaultBindSocket().getAddress();
-            bindAddress = address.getHostAddress();
         } else if (!bindAddress.trim().equals("*")) {
             try {
                 address = InetAddress.getByName(bindAddress);
             } catch (Exception e) {
-                voiceProxy.getLogger().error("An invalid bind address was specified in the config '{}', falling back to proxy bind address", bindAddress);
+                voiceProxy.getLogger().error("Invalid voice proxy bind address '{}', using proxy bind address", bindAddress);
                 address = voiceProxy.getDefaultBindSocket().getAddress();
-                bindAddress = address.getHostAddress();
             }
         }
 
+        ServerSocket listener = new ServerSocket();
         try {
-            DatagramSocket newSocket = new DatagramSocket(port, address);
-            voiceProxy.getLogger().info("Voice chat proxy server started at {}:{}", bindAddress, port);
-            return newSocket;
+            listener.bind(new InetSocketAddress(address, port));
+            voiceProxy.getLogger().info("Voice chat TCP proxy started at {}:{}", bindAddress, listener.getLocalPort());
+            return listener;
         } catch (BindException e) {
-            if (address == null || bindAddress.equals("0.0.0.0")) {
-                throw e;
+            try {
+                listener.close();
+            } catch (IOException ignored) {
             }
-            voiceProxy.getLogger().error("Failed to bind to address '{}', binding to wildcard IP instead", bindAddress);
-            return new DatagramSocket(port);
+            if (address == null || "0.0.0.0".equals(bindAddress)) throw e;
+            voiceProxy.getLogger().error("Failed to bind voice proxy to '{}', binding to wildcard address instead", bindAddress);
+            ServerSocket fallback = new ServerSocket();
+            fallback.bind(new InetSocketAddress((InetAddress) null, port));
+            return fallback;
+        }
+    }
+
+    private void readLoop(ProxyTcpConnection connection) {
+        try {
+            while (!isInterrupted() && !connection.isClosed()) {
+                handlePacket(connection.read(), connection);
+            }
+        } catch (Exception e) {
+            if (!connection.isClosed()) {
+                voiceProxy.getLogger().debug("Voice proxy client connection closed", e);
+            }
+        } finally {
+            UUID playerUUID = connectionPlayers.remove(connection);
+            lastSequences.remove(connection);
+            if (playerUUID != null) playerConnections.remove(playerUUID, connection);
+            connection.close();
+        }
+    }
+
+    private void handlePacket(byte[] raw, ProxyTcpConnection connection) throws Exception {
+        UUID backendUUID = readPlayerUUID(raw);
+        if (isPing(raw, backendUUID)) {
+            if (voiceProxy.getConfig().allowPings.get()) {
+                connection.send(buildPingResponse(raw));
+            }
+            return;
+        }
+        UUID playerUUID = voiceProxy.getSniffer().getMappedPlayerUUID(backendUUID);
+        byte[] secret = voiceProxy.getSniffer().getSecret(playerUUID);
+        if (secret == null) return;
+
+        ProxyVoicePacketCodec.DecodedPacket packet = ProxyVoicePacketCodec.decode(raw, secret, backendUUID);
+        if (packet.type() == 0x05) {
+            if (!backendUUID.equals(packet.playerUUID()) || packet.authenticatedSecret() == null
+                    || !MessageDigest.isEqual(secret, packet.authenticatedSecret())) {
+                return;
+            }
+            ProxyTcpConnection old = playerConnections.put(playerUUID, connection);
+            if (old != null && old != connection) old.close();
+            connectionPlayers.put(connection, playerUUID);
+            lastSequences.remove(connection);
+            connection.send(ProxyVoicePacketCodec.encodeControl(secret, (byte) 0x06));
+            return;
+        }
+
+        if (!playerUUID.equals(connectionPlayers.get(connection))) return;
+        if (packet.type() == 0x09) {
+            connection.send(ProxyVoicePacketCodec.encodeControl(secret, (byte) 0x0A));
+            return;
+        }
+        if (packet.type() != 0x01 || packet.audio() == null) return;
+
+        Long previous = lastSequences.putIfAbsent(connection, packet.sequence());
+        if (previous != null && packet.sequence() <= previous) return;
+        if (previous != null) lastSequences.put(connection, packet.sequence());
+
+        VoiceProxySniffer.RoutingState state = voiceProxy.getSniffer().getRoutingState(playerUUID);
+        if (state == null || !state.connected()) return;
+        for (UUID target : packet.whispering() ? state.whisperTargets() : state.normalTargets()) {
+            if (target.equals(playerUUID)) continue;
+            ProxyTcpConnection targetConnection = playerConnections.get(target);
+            byte[] targetSecret = voiceProxy.getSniffer().getSecret(target);
+            if (targetConnection == null || targetSecret == null || targetConnection.isClosed()) continue;
+            try {
+                targetConnection.send(ProxyVoicePacketCodec.encodePlayerSound(
+                        targetSecret, playerUUID, playerUUID, packet.audio(), packet.sequence(),
+                        packet.whispering(), packet.whispering() ? state.whisperDistance() : state.normalDistance()
+                ));
+            } catch (IOException e) {
+                closePlayer(target);
+            }
+        }
+    }
+
+    private static UUID readPlayerUUID(byte[] raw) {
+        if (raw == null || raw.length < 17 || raw[0] != (byte) 0xFF) {
+            throw new IllegalArgumentException("Invalid voice proxy packet header");
+        }
+        ByteBuffer buffer = ByteBuffer.wrap(raw, 1, 16);
+        return new UUID(buffer.getLong(), buffer.getLong());
+    }
+
+    private static boolean isPing(byte[] raw, UUID packetUUID) {
+        return raw.length >= 18 && packetUUID.equals(PING_UUID);
+    }
+
+    private static byte[] buildPingResponse(byte[] raw) {
+        int index = 17;
+        int length = 0;
+        int shift = 0;
+        while (index < raw.length && shift < 35) {
+            int value = raw[index++] & 0xFF;
+            length |= (value & 0x7F) << shift;
+            if ((value & 0x80) == 0) break;
+            shift += 7;
+        }
+        if (length != 24 || index + length > raw.length) throw new IllegalArgumentException("Invalid voice ping payload");
+        return java.util.Arrays.copyOfRange(raw, index, index + length);
+    }
+
+    public void disconnect(UUID playerUUID) {
+        ProxyTcpConnection connection = playerConnections.remove(playerUUID);
+        if (connection != null) {
+            connectionPlayers.remove(connection);
+            lastSequences.remove(connection);
+            connection.close();
         }
     }
 
     /**
-     * Handles a single incoming datagram by figuring out which player it belongs to and relaying it to the appropriate backend server.
-     * Any invalid datagram packets will be discarded silently.
-     *
-     * @param packet The datagram that was received on the public UDP socket
+     * Kept for the upstream ping helper and source compatibility with proxy add-ons.
      */
-    private void handlePacket(DatagramPacket packet) throws IOException {
-        // The first byte in the datagram must match the magic byte, else this is not a valid SimpleVoiceChat packet
-        ByteBuffer bb = ByteBuffer.wrap(packet.getData());
-        if (bb.get() != (byte) 0b11111111) {
-            return;
-        }
-
-        // The Player UUID comes right after the magic byte in the form of two longs
-        UUID playerUuid = new UUID(bb.getLong(), bb.getLong());
-
-        if (PingHandler.onPacket(this, packet.getSocketAddress(), playerUuid, bb)) {
-            return;
-        }
-
-        playerUuid = voiceProxy.getSniffer().getMappedPlayerUUID(playerUuid);
-
-        VoiceProxyBridgeManager.VoiceProxyBridge bridge = voiceProxyBridgeManager.getOrCreateBridge(playerUuid, packet.getSocketAddress());
-        if (bridge == null) {
-            return;
-        }
-
-        bridge.forward(packet);
-    }
-
-    public VoiceProxyBridgeManager getVoiceProxyBridgeManager() {
-        return voiceProxyBridgeManager;
-    }
-
     public VoiceProxy getVoiceProxy() {
         return voiceProxy;
     }
 
-    /**
-     * Writes a DatagramPacket out via the public UDP socket. It is assumed that the datagram is already addressed to the correct target, no modification will be performed.
-     *
-     * @param packet The DatagramPacket to write out via the public UDP socket
-     */
-    public void write(DatagramPacket packet) {
-        if (socket == null || socket.isClosed()) {
-            return;
-        }
-        try {
-            socket.send(packet);
-        } catch (Exception e) {
-            voiceProxy.getLogger().debug("An exception occurred while writing an outgoing datagram", e);
-        }
+    /** Kept for source compatibility with the upstream bridge manager. */
+    @Deprecated
+    public void write(java.net.DatagramPacket ignored) {
     }
 }

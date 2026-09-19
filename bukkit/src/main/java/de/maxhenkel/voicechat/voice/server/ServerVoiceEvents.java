@@ -105,6 +105,10 @@ public class ServerVoiceEvents implements Listener {
 
         String voiceHost = PluginManager.instance().getVoiceHost(player, Voicechat.SERVER_CONFIG.voiceHost.get());
         NetManager.sendToClient(player, new SecretPacket(player, secret, server.getPort(), Voicechat.SERVER_CONFIG, voiceHost));
+        if (Voicechat.SERVER_CONFIG.proxyMode.get()) {
+            server.getPlayerStateManager().onPlayerVoicechatConnect(player);
+            PluginManager.instance().onPlayerConnected(player);
+        }
         Voicechat.LOGGER.info("Sent secret to {}", player.getName());
     }
 

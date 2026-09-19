@@ -10,6 +10,7 @@ import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 import java.security.InvalidAlgorithmParameterException;
 import java.security.InvalidKeyException;
+import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.util.Arrays;
@@ -27,8 +28,11 @@ public class Secret {
     private final SecretKeySpec keySpec;
 
     protected Secret(byte[] secret) {
-        this.secret = secret;
-        this.keySpec = new SecretKeySpec(secret, "AES");
+        if (secret == null || secret.length != SECRET_SIZE_BYTES) {
+            throw new IllegalArgumentException("Voice chat secret must contain exactly " + SECRET_SIZE_BYTES + " bytes");
+        }
+        this.secret = Arrays.copyOf(secret, secret.length);
+        this.keySpec = new SecretKeySpec(this.secret, "AES");
     }
 
     public static Secret generateNewRandomSecret() {
@@ -52,7 +56,7 @@ public class Secret {
     }
 
     public byte[] getSecret() {
-        return secret;
+        return Arrays.copyOf(secret, secret.length);
     }
 
     public SecretKeySpec getKeySpec() {
@@ -77,6 +81,9 @@ public class Secret {
     }
 
     public byte[] decrypt(byte[] payload) throws NoSuchPaddingException, NoSuchAlgorithmException, InvalidAlgorithmParameterException, InvalidKeyException, IllegalBlockSizeException, BadPaddingException {
+        if (payload == null || payload.length < IV_SIZE_BYTES + TAG_LEN_BITS / Byte.SIZE) {
+            throw new IllegalArgumentException("Voice chat ciphertext is shorter than the GCM IV and tag");
+        }
         byte[] iv = Arrays.copyOfRange(payload, 0, IV_SIZE_BYTES);
         byte[] data = Arrays.copyOfRange(payload, IV_SIZE_BYTES, payload.length);
         Cipher cipher = Cipher.getInstance(CIPHER);
@@ -89,7 +96,7 @@ public class Secret {
         if (!(o instanceof Secret)) {
             return false;
         }
-        return Arrays.equals(secret, ((Secret) o).secret);
+        return MessageDigest.isEqual(secret, ((Secret) o).secret);
     }
 
     @Override

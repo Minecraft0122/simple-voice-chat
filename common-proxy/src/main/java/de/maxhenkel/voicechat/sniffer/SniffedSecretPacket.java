@@ -79,6 +79,10 @@ public class SniffedSecretPacket {
         return serverPort;
     }
 
+    public byte[] getSecret() {
+        return secret.clone();
+    }
+
     public UUID getPlayerUUID() {
         return playerUUID;
     }

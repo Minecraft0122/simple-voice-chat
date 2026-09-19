@@ -24,7 +24,10 @@ import java.net.SocketException;
 import java.net.UnknownHostException;
 import java.nio.channels.AsynchronousCloseException;
 import java.security.InvalidKeyException;
+import java.security.SecureRandom;
 import java.util.Collection;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
@@ -46,6 +49,10 @@ public class Server extends Thread {
     private final PlayerStateManager playerStateManager;
     private final ServerGroupManager groupManager;
     private final ServerCategoryManager categoryManager;
+    private volatile boolean running = true;
+    private long lastProxyRoutingUpdate;
+    private final long proxyRoutingGeneration = new SecureRandom().nextLong();
+    private long proxyRoutingSequence;
 
     public Server() {
         int configPort = Voicechat.SERVER_CONFIG.voiceChatPort.get();
@@ -55,7 +62,7 @@ public class Server extends Thread {
         } else {
             port = configPort;
         }
-        if (port != 0 && port == Bukkit.getPort()) {
+        if (!Voicechat.SERVER_CONFIG.proxyMode.get() && port != 0 && port == Bukkit.getPort()) {
             throw new IllegalArgumentException("TCP voice chat needs a port different from the Minecraft server port. Change port in voicechat-server.properties.");
         }
         this.server = Bukkit.getServer();
@@ -72,12 +79,20 @@ public class Server extends Thread {
         setName("VoiceChatServerThread");
         setUncaughtExceptionHandler(new VoicechatUncaughtExceptionHandler());
         processThread = new ProcessThread();
+        lastProxyRoutingUpdate = 0L;
+        proxyRoutingSequence = 0L;
         processThread.start();
     }
 
     @Override
     public void run() {
         try {
+            if (Voicechat.SERVER_CONFIG.proxyMode.get()) {
+                while (running) {
+                    Thread.sleep(1000L);
+                }
+                return;
+            }
             String bindAddress = getBindAddress();
             try {
                 InetAddress.getByName(bindAddress);
@@ -180,6 +195,7 @@ public class Server extends Thread {
     }
 
     public void close() {
+        running = false;
         socket.close();
         processThread.close();
 
@@ -206,6 +222,11 @@ public class Server extends Thread {
         public void run() {
             while (running) {
                 try {
+                    if (Voicechat.SERVER_CONFIG.proxyMode.get()) {
+                        sendProxyRoutingStates();
+                        Thread.sleep(50L);
+                        continue;
+                    }
                     pingManager.checkTimeouts();
                     long keepAliveTime = System.currentTimeMillis();
                     if (keepAliveTime - lastKeepAlive > Voicechat.SERVER_CONFIG.keepAlive.get()) {
@@ -308,6 +329,51 @@ public class Server extends Thread {
         public void close() {
             running = false;
         }
+    }
+
+    private void sendProxyRoutingStates() {
+        long now = System.currentTimeMillis();
+        if (now - lastProxyRoutingUpdate < 250L) return;
+        lastProxyRoutingUpdate = now;
+
+        for (Player sender : Bukkit.getOnlinePlayers()) {
+            PlayerState state = playerStateManager.getState(sender.getUniqueId());
+            if (state == null || !Voicechat.SERVER.isCompatible(sender)) continue;
+            boolean connected = !state.isDisconnected() && !state.isDisabled();
+            List<UUID> normal = connected ? getProxyTargets(sender, false) : List.of();
+            List<UUID> whisper = connected ? getProxyTargets(sender, true) : List.of();
+            NetManager.sendToClient(sender, new ProxyRoutingPacket(
+                    sender.getUniqueId(), proxyRoutingGeneration, ++proxyRoutingSequence, connected,
+                    Voicechat.SERVER_CONFIG.voiceChatDistance.get().floatValue(),
+                    Voicechat.SERVER_CONFIG.whisperDistance.get().floatValue(),
+                    normal, whisper
+            ));
+        }
+    }
+
+    private List<UUID> getProxyTargets(Player sender, boolean whispering) {
+        PlayerState senderState = playerStateManager.getState(sender.getUniqueId());
+        if (senderState == null) return List.of();
+        @Nullable Group senderGroup = senderState.hasGroup() ? groupManager.getGroup(senderState.getGroup()) : null;
+        float distance = whispering
+                ? Voicechat.SERVER_CONFIG.whisperDistance.get().floatValue()
+                : (float) getBroadcastRange(Utils.getDefaultDistance());
+        double maxDistanceSquared = distance * distance;
+        List<UUID> targets = new ArrayList<>();
+        for (Player receiver : Bukkit.getOnlinePlayers()) {
+            if (receiver.equals(sender) || !receiver.getWorld().equals(sender.getWorld())) continue;
+            PlayerState receiverState = playerStateManager.getState(receiver.getUniqueId());
+            if (receiverState == null || receiverState.isDisconnected() || receiverState.isDisabled()) continue;
+            if (!Voicechat.compatibility.canSee(receiver, sender)) continue;
+            boolean sameGroup = senderState.hasGroup() && senderState.getGroup().equals(receiverState.getGroup());
+            @Nullable Group receiverGroup = receiverState.hasGroup() ? groupManager.getGroup(receiverState.getGroup()) : null;
+            if (receiverGroup != null && receiverGroup.isIsolated() && !sameGroup) continue;
+            if (!sameGroup && senderGroup != null && !senderGroup.isOpen()) continue;
+            if (sameGroup || receiver.getLocation().distanceSquared(sender.getLocation()) <= maxDistanceSquared) {
+                targets.add(receiver.getUniqueId());
+            }
+        }
+        return List.copyOf(targets);
     }
 
     public void onMicPacket(UUID playerUuid, MicPacket packet) {

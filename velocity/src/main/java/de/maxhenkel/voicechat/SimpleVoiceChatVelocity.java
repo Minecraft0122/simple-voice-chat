@@ -87,7 +87,8 @@ public class SimpleVoiceChatVelocity extends VoiceProxy {
                 MinecraftChannelIdentifier.from(REQUEST_SECRET_CHANNEL),
                 MinecraftChannelIdentifier.from(REQUEST_SECRET_CHANNEL_1_12),
                 MinecraftChannelIdentifier.from(SECRET_CHANNEL),
-                MinecraftChannelIdentifier.from(SECRET_CHANNEL_1_12)
+                MinecraftChannelIdentifier.from(SECRET_CHANNEL_1_12),
+                MinecraftChannelIdentifier.from(PROXY_ROUTING_CHANNEL)
         );
         proxyServer.getCommandManager().register(proxyServer.getCommandManager().metaBuilder(VOICECHAT_COMMAND).plugin(this).build(), (SimpleCommand) invocation -> {
             onVoicechatCommand(new CommandSender() {
@@ -167,7 +168,9 @@ public class SimpleVoiceChatVelocity extends VoiceProxy {
                 return;
             }
             event.setResult(PluginMessageEvent.ForwardResult.handled());
-            event.getTarget().sendPluginMessage(event.getIdentifier(), replacement.array());
+            if (!event.getIdentifier().getId().equals(PROXY_ROUTING_CHANNEL)) {
+                event.getTarget().sendPluginMessage(event.getIdentifier(), replacement.array());
+            }
         } catch (IncompatibleVoiceChatException e) {
             event.setResult(PluginMessageEvent.ForwardResult.handled());
             getLogger().info("Player {} has an incompatible voice chat version: {}", p.getUsername(), e.getMessage());

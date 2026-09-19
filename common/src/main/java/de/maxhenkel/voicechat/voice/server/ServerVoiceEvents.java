@@ -116,6 +116,10 @@ public class ServerVoiceEvents {
         }
 
         NetManager.sendToClient(player, new SecretPacket(player, secret, server.getPort(), Voicechat.SERVER_CONFIG, voiceHost));
+        if (Voicechat.SERVER_CONFIG.proxyMode.get()) {
+            server.onPlayerVoicechatConnect(player);
+            PluginManager.instance().onPlayerConnected(player);
+        }
         Voicechat.LOGGER.info("Sent secret to {}", player.getName().getString());
     }
 

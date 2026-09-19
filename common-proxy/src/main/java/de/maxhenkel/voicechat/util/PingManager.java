@@ -1,186 +1,129 @@
 package de.maxhenkel.voicechat.util;
 
+import java.io.EOFException;
 import java.io.IOException;
-import java.net.*;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.InetSocketAddress;
+import java.net.Socket;
+import java.net.SocketAddress;
+import java.net.SocketTimeoutException;
 import java.nio.ByteBuffer;
+import java.util.Arrays;
 import java.util.UUID;
 
+/** TCP diagnostic probe for the central voice endpoint. */
 public class PingManager {
+
+    private static final UUID CHECK_V1 = UUID.fromString("58bc9ae9-c7a8-45e4-a11c-efbb67199425");
+    private static final byte MAGIC_BYTE = (byte) 0xFF;
+    private static final int INTERVAL = 1000;
+    private static final int MAX_FRAME_SIZE = 4096;
 
     public static void sendPing(SocketAddress address, int port, int attempts, PingListener listener) {
         new PingThread((InetSocketAddress) address, port, attempts, listener).start();
     }
 
     private static class PingThread extends Thread {
-
-        private static final UUID CHECK_V1 = UUID.fromString("58bc9ae9-c7a8-45e4-a11c-efbb67199425");
-        protected static final byte MAGIC_BYTE = (byte) 0b11111111;
-
-        private static final int INTERVAL = 1000;
-
         private final InetSocketAddress address;
         private final int port;
         private final int totalAttempts;
         private final PingListener listener;
 
-        public PingThread(InetSocketAddress address, int port, int totalAttempts, PingListener listener) {
+        private PingThread(InetSocketAddress address, int port, int totalAttempts, PingListener listener) {
             this.address = address;
             this.port = port;
             this.totalAttempts = totalAttempts;
             this.listener = listener;
             setDaemon(true);
-            setName("PingThread");
+            setName("TcpVoiceChatPingThread");
         }
 
         @Override
         public void run() {
-            InetAddress host = address.getAddress();
-            if (host == null) {
+            int timeoutCount = 0;
+            int successCount = 0;
+            int lowestPing = -1;
+            for (int i = 0; i < totalAttempts; i++) {
                 try {
-                    host = InetAddress.getByName(address.getHostString());
-                } catch (UnknownHostException e) {
+                    listener.onSend(i + 1);
+                    long sentAt = System.currentTimeMillis();
+                    try (Socket socket = new Socket()) {
+                        socket.setTcpNoDelay(true);
+                        socket.setSoTimeout(INTERVAL);
+                        socket.connect(address.isUnresolved()
+                                ? new InetSocketAddress(address.getHostString(), port)
+                                : new InetSocketAddress(address.getAddress(), port), INTERVAL);
+                        writeFrame(socket.getOutputStream(), buildRequest(UUID.randomUUID(), sentAt));
+                        readFrame(socket.getInputStream());
+                    }
+                    int ping = (int) (System.currentTimeMillis() - sentAt);
+                    listener.onSuccessfulAttempt(i + 1, ping);
+                    successCount++;
+                    if (lowestPing < 0 || ping < lowestPing) lowestPing = ping;
+                } catch (SocketTimeoutException e) {
+                    listener.onFailedAttempt(i + 1);
+                    timeoutCount++;
+                } catch (Exception e) {
                     listener.onError(e);
                     return;
                 }
-            }
-            try (DatagramSocket socket = new DatagramSocket()) {
-                socket.setSoTimeout(INTERVAL);
-                int timeoutCount = 0;
-                int successCount = 0;
-                int lowestPing = -1;
-                for (int i = 0; i < totalAttempts; i++) {
+                if (i + 1 < totalAttempts) {
                     try {
-                        listener.onSend(i + 1);
-                        sendPing(socket, host, port);
-                    } catch (Exception e) {
-                        listener.onError(e);
-                        return;
-                    }
-                    try {
-                        Pong pong = receivePong(socket);
-                        int ping = (int) (System.currentTimeMillis() - pong.getTimestamp());
-                        listener.onSuccessfulAttempt(i + 1, ping);
-                        successCount++;
-                        if (lowestPing < 0 || ping < lowestPing) {
-                            lowestPing = ping;
-                        }
                         Thread.sleep(INTERVAL);
-                    } catch (SocketTimeoutException e) {
-                        listener.onFailedAttempt(i + 1);
-                        timeoutCount++;
-                    } catch (Exception e) {
-                        listener.onError(e);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
                         return;
                     }
                 }
-                listener.onFinish(successCount, timeoutCount, lowestPing);
-            } catch (SocketException e) {
-                listener.onError(e);
             }
+            listener.onFinish(successCount, timeoutCount, lowestPing);
         }
+    }
 
-        private static void sendPing(DatagramSocket socket, InetAddress host, int port) throws IOException {
-            Ping ping = new Ping(UUID.randomUUID(), System.currentTimeMillis());
-            ByteBuffer byteBuf = ByteBuffer.allocate(3 * 8);
-            ping.write(byteBuf);
-            byteBuf.flip();
-            byte[] byteArray = new byte[byteBuf.remaining()];
-            byteBuf.get(byteArray);
-            send(socket, host, port, CHECK_V1, byteArray);
+    private static byte[] buildRequest(UUID id, long timestamp) {
+        ByteBuffer payload = ByteBuffer.allocate(24);
+        payload.putLong(id.getMostSignificantBits()).putLong(id.getLeastSignificantBits()).putLong(timestamp);
+        byte[] bytes = payload.array();
+        ByteBuffer packet = ByteBuffer.allocate(1 + 16 + 5 + bytes.length);
+        packet.put(MAGIC_BYTE).putLong(CHECK_V1.getMostSignificantBits()).putLong(CHECK_V1.getLeastSignificantBits());
+        putVarInt(packet, bytes.length).put(bytes);
+        return Arrays.copyOf(packet.array(), packet.position());
+    }
+
+    private static void writeFrame(OutputStream output, byte[] data) throws IOException {
+        if (data.length <= 0 || data.length > MAX_FRAME_SIZE) throw new IOException("Invalid TCP ping frame");
+        output.write((data.length >>> 24) & 0xFF);
+        output.write((data.length >>> 16) & 0xFF);
+        output.write((data.length >>> 8) & 0xFF);
+        output.write(data.length & 0xFF);
+        output.write(data);
+        output.flush();
+    }
+
+    private static byte[] readFrame(InputStream input) throws IOException {
+        int a = input.read(), b = input.read(), c = input.read(), d = input.read();
+        if ((a | b | c | d) < 0) throw new EOFException("Truncated TCP ping response frame");
+        int length = (a << 24) | (b << 16) | (c << 8) | d;
+        if (length <= 0 || length > MAX_FRAME_SIZE) throw new IOException("Invalid TCP ping response frame");
+        byte[] result = input.readNBytes(length);
+        if (result.length != length) throw new EOFException("Truncated TCP ping response");
+        return result;
+    }
+
+    private static ByteBuffer putVarInt(ByteBuffer buffer, int value) {
+        while ((value & 0xFFFFFF80) != 0) {
+            buffer.put((byte) ((value & 0x7F) | 0x80));
+            value >>>= 7;
         }
-
-        private static Pong receivePong(DatagramSocket socket) throws IOException {
-            ByteBuffer received = receive(socket);
-            return read(received);
-        }
-
-        protected static void send(DatagramSocket socket, InetAddress host, int port, UUID id, byte[] payload) throws IOException {
-            ByteBuffer byteBuf = ByteBuffer.allocate(4096);
-
-            byteBuf.put(MAGIC_BYTE);
-            byteBuf.putLong(id.getMostSignificantBits());
-            byteBuf.putLong(id.getLeastSignificantBits());
-
-            VarIntUtils.write(byteBuf, payload.length);
-            byteBuf.put(payload);
-
-            byteBuf.flip();
-            byte[] byteArray = new byte[byteBuf.remaining()];
-            byteBuf.get(byteArray);
-
-            DatagramPacket sendPacket = new DatagramPacket(byteArray, byteArray.length, host, port);
-
-            socket.send(sendPacket);
-        }
-
-        protected static ByteBuffer receive(DatagramSocket socket) throws IOException {
-            byte[] receiveData = new byte[4096];
-
-            DatagramPacket receivePacket = new DatagramPacket(receiveData, receiveData.length);
-            socket.receive(receivePacket);
-
-            return ByteBuffer.wrap(receiveData, 0, receivePacket.getLength());
-        }
+        return buffer.put((byte) value);
     }
 
     public interface PingListener {
-
         void onSend(int attempts);
-
         void onSuccessfulAttempt(int attempts, long pingMilliseconds);
-
         void onFailedAttempt(int attempts);
-
         void onFinish(int successfulAttempts, int timeoutAttempts, long pingMilliseconds);
-
         void onError(Exception e);
     }
-
-    private static class Ping {
-
-        protected UUID id;
-        protected long timestamp;
-
-        public Ping(UUID id, long timestamp) {
-            this.id = id;
-            this.timestamp = timestamp;
-        }
-
-        public void write(ByteBuffer buf) {
-            buf.putLong(id.getMostSignificantBits());
-            buf.putLong(id.getLeastSignificantBits());
-            buf.putLong(timestamp);
-        }
-
-    }
-
-    private static class Pong {
-
-        protected UUID id;
-        protected long timestamp;
-
-        public Pong(UUID id, long timestamp) {
-            this.id = id;
-            this.timestamp = timestamp;
-        }
-
-        public Pong() {
-        }
-
-        public UUID getId() {
-            return id;
-        }
-
-        public long getTimestamp() {
-            return timestamp;
-        }
-    }
-
-    private static Pong read(ByteBuffer buf) {
-        Pong pong = new Pong();
-        pong.id = new UUID(buf.getLong(), buf.getLong());
-        pong.timestamp = buf.getLong();
-        return pong;
-    }
-
 }

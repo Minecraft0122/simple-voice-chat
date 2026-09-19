@@ -10,6 +10,8 @@ import de.maxhenkel.voicechat.intercompatibility.CommonCompatibilityManager;
 import de.maxhenkel.voicechat.permission.PermissionManager;
 import de.maxhenkel.voicechat.plugins.PluginManager;
 import de.maxhenkel.voicechat.voice.common.*;
+import de.maxhenkel.voicechat.net.NetManager;
+import de.maxhenkel.voicechat.net.ProxyRoutingPacket;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.dedicated.DedicatedServer;
@@ -21,7 +23,10 @@ import java.net.InetAddress;
 import java.net.SocketException;
 import java.net.UnknownHostException;
 import java.nio.channels.AsynchronousCloseException;
+import java.security.SecureRandom;
 import java.util.Collection;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
@@ -45,6 +50,9 @@ public class Server extends Thread {
     private final PlayerStateManager playerStateManager;
     private final ServerGroupManager groupManager;
     private final ServerCategoryManager categoryManager;
+    private long lastProxyRoutingUpdate;
+    private final long proxyRoutingGeneration = new SecureRandom().nextLong();
+    private long proxyRoutingSequence;
 
     public Server(MinecraftServer server) {
         dedicated = server instanceof DedicatedServer;
@@ -59,7 +67,7 @@ public class Server extends Thread {
             } else {
                 port = configPort;
             }
-            if (port != 0 && port == server.getPort()) {
+            if (!Voicechat.SERVER_CONFIG.proxyMode.get() && port != 0 && port == server.getPort()) {
                 throw new IllegalArgumentException("TCP voice chat needs a port different from the Minecraft server port. Change port in voicechat-server.properties.");
             }
         } else {
@@ -79,6 +87,8 @@ public class Server extends Thread {
         setName("VoiceChatServerThread");
         setUncaughtExceptionHandler(new VoicechatUncaughtExceptionHandler());
         processThread = new ProcessThread();
+        lastProxyRoutingUpdate = 0L;
+        proxyRoutingSequence = 0L;
     }
 
     public void onPlayerLoggedIn(ServerPlayer player) {
@@ -119,6 +129,14 @@ public class Server extends Thread {
             if (!running) {
                 return;
             }
+            processThread.start();
+            if (Voicechat.SERVER_CONFIG.proxyMode.get()) {
+                while (running) {
+                    Thread.sleep(1000L);
+                }
+                return;
+            }
+
             String bindAddress = getBindAddress();
             try {
                 InetAddress.getByName(bindAddress);
@@ -131,8 +149,6 @@ public class Server extends Thread {
             if (!running) {
                 return;
             }
-            processThread.start();
-
             if (bindAddress.isEmpty()) {
                 Voicechat.LOGGER.info("Voice chat server started at port {}", socket.getLocalPort());
             } else {
@@ -206,7 +222,7 @@ public class Server extends Thread {
         if (!running) {
             throw new IllegalStateException("Voice chat server is closed");
         }
-        if (port != 0 && port == server.getPort()) {
+        if (!Voicechat.SERVER_CONFIG.proxyMode.get() && port != 0 && port == server.getPort()) {
             throw new IllegalArgumentException("TCP voice chat cannot share the Minecraft server port");
         }
         VoicechatSocket newSocket = PluginManager.instance().getSocketImplementation(server);
@@ -288,6 +304,11 @@ public class Server extends Thread {
         public void run() {
             while (running) {
                 try {
+                    if (Voicechat.SERVER_CONFIG.proxyMode.get()) {
+                        sendProxyRoutingStates();
+                        Thread.sleep(50L);
+                        continue;
+                    }
                     pingManager.checkTimeouts();
                     long keepAliveTime = System.currentTimeMillis();
                     if (keepAliveTime - lastKeepAlive > Voicechat.SERVER_CONFIG.keepAlive.get()) {
@@ -386,6 +407,73 @@ public class Server extends Thread {
         public void close() {
             running = false;
         }
+    }
+
+    private void sendProxyRoutingStates() {
+        long now = System.currentTimeMillis();
+        if (now - lastProxyRoutingUpdate < 250L) {
+            return;
+        }
+        lastProxyRoutingUpdate = now;
+
+        for (ServerPlayer sender : server.getPlayerList().getPlayers()) {
+            PlayerState state = playerStateManager.getState(sender.getUUID());
+            if (state == null || !Voicechat.SERVER.isCompatible(sender)) {
+                continue;
+            }
+
+            boolean connected = !state.isDisconnected() && !state.isDisabled();
+            List<UUID> normalTargets = connected ? getProxyTargets(sender, false) : List.of();
+            List<UUID> whisperTargets = connected ? getProxyTargets(sender, true) : List.of();
+            NetManager.sendToClient(sender, new ProxyRoutingPacket(
+                    sender.getUUID(), proxyRoutingGeneration, ++proxyRoutingSequence, connected,
+                    Voicechat.SERVER_CONFIG.voiceChatDistance.get().floatValue(),
+                    Voicechat.SERVER_CONFIG.whisperDistance.get().floatValue(),
+                    normalTargets, whisperTargets
+            ));
+        }
+    }
+
+    private List<UUID> getProxyTargets(ServerPlayer sender, boolean whispering) {
+        PlayerState senderState = playerStateManager.getState(sender.getUUID());
+        if (senderState == null) {
+            return List.of();
+        }
+
+        @Nullable Group senderGroup = senderState.hasGroup() ? groupManager.getGroup(senderState.getGroup()) : null;
+
+        float distance = whispering
+                ? Voicechat.SERVER_CONFIG.whisperDistance.get().floatValue()
+                : (float) getBroadcastRange(Utils.getDefaultDistanceServer());
+        double maxDistanceSquared = distance * distance;
+        List<UUID> targets = new ArrayList<>();
+
+        for (ServerPlayer receiver : server.getPlayerList().getPlayers()) {
+            if (receiver == sender || receiver.level() != sender.level()) {
+                continue;
+            }
+            PlayerState receiverState = playerStateManager.getState(receiver.getUUID());
+            if (receiverState == null || receiverState.isDisconnected() || receiverState.isDisabled()) {
+                continue;
+            }
+            if (!CommonCompatibilityManager.INSTANCE.canSee(receiver, sender)) {
+                continue;
+            }
+
+            boolean sameGroup = senderState.hasGroup() && senderState.getGroup().equals(receiverState.getGroup());
+            @Nullable Group receiverGroup = receiverState.hasGroup() ? groupManager.getGroup(receiverState.getGroup()) : null;
+            if (receiverGroup != null && receiverGroup.isIsolated() && !sameGroup) {
+                continue;
+            }
+            if (!sameGroup && senderGroup != null && !senderGroup.isOpen()) {
+                continue;
+            }
+            boolean inRange = receiver.distanceToSqr(sender) <= maxDistanceSquared;
+            if (sameGroup || inRange) {
+                targets.add(receiver.getUUID());
+            }
+        }
+        return List.copyOf(targets);
     }
 
     public void onMicPacket(UUID playerUuid, MicPacket packet) {

@@ -15,11 +15,12 @@ public class ProxyConfig {
         builder.header(String.format("Simple Voice Chat proxy config v%s", BuildConstants.MOD_VERSION));
 
         port = builder
-                .integerEntry("port", -1, -1, 65535,
+                .integerEntry("port", 24454, 0, 65535,
                         "The port number to use for the voice chat communication.",
-                        "Audio packets are always transmitted via the UDP protocol on the port number",
+                        "Audio packets are always transmitted via the TCP protocol on the port number",
                         "specified here, independently of other networking used for the game server.",
-                        "Set this to '-1' to use the same port number as the one used by the proxy."
+                        "Use a separate port from the Minecraft proxy and forward it as TCP.",
+                        "Set this to '0' to let the operating system select an available TCP port."
                 );
 
         bindAddress = builder

@@ -29,6 +29,7 @@ public class ServerConfig {
     public ConfigEntry<Boolean> allowPings;
     public ConfigEntry<Boolean> useNatives;
     public ConfigEntry<Boolean> threadedServerSupport;
+    public ConfigEntry<Boolean> proxyMode;
 
     public ServerConfig(ConfigBuilder builder, Voicechat.Loader loader) {
 
@@ -131,6 +132,12 @@ public class ServerConfig {
                 .booleanEntry("threaded_server_support", Voicechat.Loader.PAPER.equals(loader),
                         "If the voice chat should support servers that run multiple threads, like Folia",
                         "Disabling this may slightly improve performance, but can cause issues on servers that don't run everything on a single thread"
+                );
+        proxyMode = builder
+                .booleanEntry("proxy_mode", false,
+                        "If a Velocity/BungeeCord proxy handles voice packets and this server only sends routing metadata",
+                        "Enable this on backend servers when using the central TCP voice proxy",
+                        "The proxy must use the same TCP voice chat fork and is trusted with voice encryption keys"
                 );
     }
 

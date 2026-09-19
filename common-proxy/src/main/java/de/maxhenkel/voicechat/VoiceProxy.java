@@ -27,6 +27,7 @@ public abstract class VoiceProxy {
 
     public static final String SECRET_CHANNEL = "voicechat:secret";
     public static final String SECRET_CHANNEL_1_12 = "vc:secret";
+    public static final String PROXY_ROUTING_CHANNEL = "voicechat:proxy_routing";
     public static final String REQUEST_SECRET_CHANNEL = "voicechat:request_secret";
     public static final String REQUEST_SECRET_CHANNEL_1_12 = "vc:request_secret";
 
@@ -65,7 +66,10 @@ public abstract class VoiceProxy {
     public int getPort() {
         int port = getConfig().port.get();
         if (port == -1) {
-            port = getDefaultBindSocket().getPort();
+            port = 24454;
+        }
+        if (port != 0 && port == getDefaultBindSocket().getPort()) {
+            throw new IllegalArgumentException("TCP voice proxy needs a port different from the Minecraft proxy port");
         }
         return port;
     }
@@ -115,7 +119,7 @@ public abstract class VoiceProxy {
      */
     public void disconnectBridge(UUID playerUUID) {
         if (voiceProxyServer != null) {
-            voiceProxyServer.getVoiceProxyBridgeManager().disconnect(playerUUID);
+            voiceProxyServer.disconnect(playerUUID);
         }
     }
 
