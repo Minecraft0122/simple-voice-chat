@@ -66,7 +66,10 @@ AES-GCM key. The fork retains AES-GCM with random 12-byte IVs and 128-bit tags; 
 defensive key handling, ciphertext length checks, constant-time secret comparison and
 strictly increasing microphone sequence checks at the central endpoint. This is not TLS,
 does not provide forward secrecy, and offline Minecraft mode still requires a separately
-protected game/proxy connection. Proxy mode transfers the built-in distance, visibility
+protected game/proxy connection. Authentication still uses the per-player secret delivered
+through the Minecraft channel; AES-GCM does not by itself make a captured authentication
+frame single-use. A future incompatible protocol revision could add a challenge-response
+handshake and HKDF-derived direction keys. Proxy mode transfers the built-in distance, visibility
 and group target sets; addons that replace microphone routing or listener decisions must
 be adapted to provide equivalent proxy metadata.
 
