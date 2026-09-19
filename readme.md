@@ -9,7 +9,7 @@
 | --- | --- | --- |
 | `tcp/26.1` | 26.1 / 26.1.1 / 26.1.2 | Fabric、NeoForge、Forge、Paper |
 | `tcp/26.2` | 26.2 | Fabric、NeoForge、Forge、Paper |
-| `tcp/26.3` | 26.3 | Fabric、NeoForge、Paper |
+| `tcp/26.3` | 26.3 | Fabric、NeoForge、Bukkit、Paper |
 
 仅维护 26+。各游戏版本分别构建；不要跨 Minecraft 版本使用同一个模组 JAR。
 请从本仓库对应分支的 Actions 构建产物获取文件，原版下载链接提供的是 UDP 版本。
@@ -23,7 +23,7 @@
 局域网开放世界时保留自动分配的独立语音端口，游戏聊天栏会显示该端口。
 Minecraft 代理可以继续转发游戏连接，但语音必须直连后端或通过普通 TCP 端口转发。
 **不支持上游 UDP 语音代理（Velocity / BungeeCord）、UDP 检测工具或替换为 UDP 的第三方 socket 实现。**
-26.3 中继承的旧 Bukkit / 语音代理代码不属于本分支构建和支持范围。
+26.3 的 Bukkit/Paper 插件也使用 TCP；Velocity/BungeeCord 等上游 UDP 代理模块不在本分支支持范围。
 本分支的协议兼容编号为 `1020`，原版 UDP 客户端会收到版本不兼容提示。
 
 ## 构建与验证
