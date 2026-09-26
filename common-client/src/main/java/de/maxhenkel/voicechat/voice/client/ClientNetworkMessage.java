@@ -27,11 +27,17 @@ public class ClientNetworkMessage {
             Voicechat.LOGGER.debug("Received invalid packet from {}", client.getAddress());
             return null;
         }
-        return NetworkMessage.readFromBytes(packet.getSocketAddress(), client.getData().getSecret(), b.readByteArray(Utils.MAX_VOICE_CHAT_PACKET_SIZE), System.currentTimeMillis());
+        byte[] encrypted = b.readByteArray(Utils.MAX_VOICE_CHAT_PACKET_SIZE);
+        NetworkMessage message = NetworkMessage.readFromBytes(packet.getSocketAddress(), client.getReadSecret(), encrypted, System.currentTimeMillis());
+        if (message == null && !client.isInitialized()) {
+            message = NetworkMessage.readFromBytes(packet.getSocketAddress(), client.getData().getSecret(), encrypted, System.currentTimeMillis());
+            if (message != null && !(message.getPacket() instanceof de.maxhenkel.voicechat.voice.common.AuthenticationChallengePacket)) return null;
+        }
+        return message;
     }
 
     public static byte[] writeClient(ClientVoicechatConnection client, NetworkMessage networkMessage) throws InvalidAlgorithmParameterException, NoSuchPaddingException, IllegalBlockSizeException, NoSuchAlgorithmException, BadPaddingException, InvalidKeyException {
-        byte[] payload = networkMessage.write(client.getData().getSecret());
+        byte[] payload = networkMessage.write(client.getWriteSecret(networkMessage.getPacket()));
         FriendlyByteBuf buffer = new FriendlyByteBuf(Unpooled.buffer(1 + 16 + payload.length));
         buffer.writeByte(NetworkMessage.MAGIC_BYTE);
         buffer.writeUUID(client.getData().getPlayerUUID());

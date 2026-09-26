@@ -76,6 +76,9 @@ public class NetworkMessage {
         packetRegistry.put((byte) 0x8, KeepAlivePacket.class);
         packetRegistry.put((byte) 0x9, ConnectionCheckPacket.class);
         packetRegistry.put((byte) 0xA, ConnectionCheckAckPacket.class);
+        packetRegistry.put((byte) 0xB, AuthenticationChallengePacket.class);
+        packetRegistry.put((byte) 0xC, AuthenticationResponsePacket.class);
+        packetRegistry.put((byte) 0xD, AvailabilityPacket.class);
     }
 
     @Nullable
@@ -96,7 +99,15 @@ public class NetworkMessage {
                 Voicechat.LOGGER.debug("Player {} does not have a secret", playerID);
                 return null;
             }
-            return readFromBytes(packet.getSocketAddress(), server.getSecret(playerID), b.readByteArray(Utils.MAX_VOICE_CHAT_PACKET_SIZE), packet.getTimestamp());
+            byte[] encrypted = b.readByteArray(Utils.MAX_VOICE_CHAT_PACKET_SIZE);
+            ClientConnection session = server.findVoiceSession(playerID, packet.getSocketAddress());
+            NetworkMessage decoded = readFromBytes(packet.getSocketAddress(), session == null ? server.getSecret(playerID) : session.getReadSecret(server), encrypted, packet.getTimestamp());
+            if (decoded == null && session != null) {
+                decoded = readFromBytes(packet.getSocketAddress(), server.getSecret(playerID), encrypted, packet.getTimestamp());
+                if (decoded != null && !(decoded.getPacket() instanceof AuthenticatePacket) && !(decoded.getPacket() instanceof AuthenticationResponsePacket)) return null;
+            }
+            if (session == null && decoded != null && !(decoded.getPacket() instanceof AuthenticatePacket) && !(decoded.getPacket() instanceof AuthenticationResponsePacket)) return null;
+            return decoded;
         } catch (DecoderException | IndexOutOfBoundsException e) {
             Voicechat.LOGGER.debug("Received invalid packet from {}", packet.getSocketAddress());
             return null;
@@ -113,7 +124,11 @@ public class NetworkMessage {
             Voicechat.LOGGER.debug("Failed to decrypt packet from {}", socketAddress);
             return null;
         }
-        FriendlyByteBuf buffer = new FriendlyByteBuf(Unpooled.wrappedBuffer(decrypt));
+        return readPlaintext(socketAddress, decrypt, timestamp);
+    }
+
+    public static NetworkMessage readPlaintext(SocketAddress socketAddress, byte[] plaintext, long timestamp) throws InstantiationException, IllegalAccessException, NoSuchMethodException, InvocationTargetException {
+        FriendlyByteBuf buffer = new FriendlyByteBuf(Unpooled.wrappedBuffer(plaintext));
         byte packetType = buffer.readByte();
         Class<? extends Packet> packetClass = packetRegistry.get(packetType);
         if (packetClass == null) {
@@ -139,7 +154,7 @@ public class NetworkMessage {
     }
 
     public byte[] writeServer(Server server, ClientConnection connection) throws InvalidAlgorithmParameterException, NoSuchPaddingException, IllegalBlockSizeException, NoSuchAlgorithmException, BadPaddingException, InvalidKeyException {
-        byte[] payload = write(server.getSecret(connection.getPlayerUUID()));
+        byte[] payload = write(connection.getWriteSecret(server, packet));
         FriendlyByteBuf buffer = new FriendlyByteBuf(Unpooled.buffer(1 + payload.length));
         buffer.writeByte(MAGIC_BYTE);
         buffer.writeByteArray(payload);
@@ -150,6 +165,10 @@ public class NetworkMessage {
     }
 
     public byte[] write(Secret secret) throws InvalidAlgorithmParameterException, NoSuchPaddingException, IllegalBlockSizeException, NoSuchAlgorithmException, BadPaddingException, InvalidKeyException {
+        return secret.encrypt(writePlaintext());
+    }
+
+    public byte[] writePlaintext() {
         FriendlyByteBuf buffer = new FriendlyByteBuf(Unpooled.buffer());
 
         byte type = getPacketType(packet);
@@ -160,7 +179,9 @@ public class NetworkMessage {
         buffer.writeByte(type);
         packet.toBytes(buffer);
 
-        return secret.encrypt(buffer.array());
+        byte[] bytes = new byte[buffer.readableBytes()];
+        buffer.readBytes(bytes);
+        return bytes;
     }
 
 }

@@ -2,6 +2,8 @@ apply plugin: 'com.gradleup.shadow'
 
 apply from: "https://raw.githubusercontent.com/henkelmax/mod-gradle-scripts/${mod_gradle_script_version}/mod.gradle"
 
+sourceSets.main.java.srcDir project(':common').file('src/main/java/de/maxhenkel/voicechat/voice/transport')
+
 sourceSets {
     template {
         java {

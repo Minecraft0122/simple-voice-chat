@@ -23,6 +23,10 @@ jobs:
         run: bash scripts/test-tcp.sh
       - name: Run central proxy protocol regressions
         run: bash scripts/test-proxy.sh
+      - name: Run central proxy session and backend regressions
+        run: bash scripts/test-runtime.sh
+      - name: Run actual client lifecycle regressions with game and audio doubles
+        run: python3 tests/client/run.py
 
   build:
     runs-on: ubuntu-latest
@@ -54,6 +58,8 @@ jobs:
             bukkit/build/libs/*.jar
             neoforge/build/libs/*.jar
             forge/build/libs/*.jar
+            velocity/build/libs/*.jar
+            bungeecord/build/libs/*.jar
             !**/*-sources.jar
             !**/*-javadoc.jar
             !**/*-dev.jar

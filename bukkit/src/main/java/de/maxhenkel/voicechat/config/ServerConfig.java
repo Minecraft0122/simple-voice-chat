@@ -27,6 +27,7 @@ public class ServerConfig {
     public ConfigEntry<Boolean> allowPings;
     public ConfigEntry<Boolean> threadedServerSupport;
     public final ConfigEntry<Boolean> proxyMode;
+    public final ConfigEntry<Boolean> allowSpectatorVoice;
 
     public ServerConfig(ConfigBuilder builder) {
         builder.header(String.format("%s server config v%s", BuildConstants.PLUGIN_NAME, Voicechat.INSTANCE.getDescription().getVersion()));
@@ -38,7 +39,7 @@ public class ServerConfig {
                         "specified here, independently of other networking used for the game server.",
                         "Use a separate port from the Minecraft server and forward it as TCP.",
                         "The legacy value '-1' uses 24454; sharing the game TCP port is not supported.",
-                        "Set this to '0' to let the operating system select an available TCP port."
+                        "Port 0 is forbidden and prevents the voice service from starting."
                 );
         voiceChatBindAddress = builder
                 .stringEntry("bind_address", "",
@@ -121,6 +122,7 @@ public class ServerConfig {
                         "If the voice chat should support servers that run multiple threads, like Folia",
                         "Disabling this may slightly improve performance, but can cause issues on servers that don't run everything on a single thread"
                 );
+        allowSpectatorVoice = builder.booleanEntry("allow_spectator_voice", false, "Allow spectators to send and receive voice chat. Disabled by default.");
         proxyMode = builder
                 .booleanEntry("proxy_mode", false,
                         "If a Velocity/BungeeCord proxy handles voice packets and this server only sends routing metadata",

@@ -17,7 +17,6 @@ import net.minecraft.client.Minecraft;
 
 import javax.annotation.Nullable;
 import java.io.IOException;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
 public class MicThread extends Thread {
@@ -251,13 +250,12 @@ public class MicThread extends Thread {
         return !running;
     }
 
-    private final AtomicLong sequenceNumber = new AtomicLong();
     private volatile boolean stopPacketSent = true;
 
     private void sendAudioPacket(short[] audio, boolean whispering) {
-        if (connection != null && connection.isInitialized()) {
+        if (connection != null && connection.canSendAudio()) {
             byte[] encoded = encoder.encode(audio);
-            connection.sendToServer(new NetworkMessage(new MicPacket(encoded, whispering, sequenceNumber.getAndIncrement())));
+            connection.sendToServer(new NetworkMessage(new MicPacket(encoded, whispering, connection.nextAudioSequence())));
             stopPacketSent = false;
         }
         try {
@@ -275,10 +273,10 @@ public class MicThread extends Thread {
             return;
         }
 
-        if (connection == null || !connection.isInitialized()) {
+        if (connection == null || !connection.canSendAudio()) {
             return;
         }
-        connection.sendToServer(new NetworkMessage(new MicPacket(new byte[0], false, sequenceNumber.getAndIncrement())));
+        connection.sendToServer(new NetworkMessage(new MicPacket(new byte[0], false, connection.nextAudioSequence())));
         stopPacketSent = true;
     }
 }

@@ -17,14 +17,18 @@
 1. 服务端安装本分支对应平台的模组；Paper 服务器将 Paper JAR 放入 `plugins/`。
 2. **所有玩家也必须安装本分支对应游戏版本的客户端模组**。仅替换服务器插件无法让原版客户端改用 TCP。
 3. 直连后端时，在 `config/voicechat/voicechat-server.properties`（Paper 为 `plugins/voicechat/voicechat-server.properties`）中设置 `port=24454`，并放行/转发 **24454/TCP**。
-4. 语音 TCP 端口必须与 Minecraft 游戏端口不同。旧配置 `port=-1` 会改用 `24454`；`port=0` 会选择空闲端口。
+4. 语音 TCP 端口必须与 Minecraft 游戏端口不同。旧配置 `port=-1` 会改用 `24454`；**`port=0` 会拒绝启动语音服务**，必须使用固定端口。
 5. 若使用端口映射或独立语音域名，将 `voice_host` 设为玩家可连接的 `域名:外部TCP端口`。
 
-局域网开放世界时保留自动分配的独立语音端口，游戏聊天栏会显示该端口。
-Minecraft 代理可以使用 26.3 分支内置的集中 TCP 语音代理。每个后端服都安装同一分支的服务端插件，并在其配置中设置 `proxy_mode=true`；后端不再监听玩家语音 TCP 连接，只通过 `voicechat:proxy_routing` 插件消息发送玩家状态、距离和目标 UUID。Velocity/BungeeCord 代理监听公共 `24454/TCP`，直接完成客户端认证、解密、路由和重新加密，后端之间不会转发音频流。
+局域网开放世界也使用配置的固定语音端口（默认 24454），游戏聊天栏会显示该端口。
+Minecraft 代理可以使用 26.3 分支内置的集中 TCP 语音代理。每个后端服都安装同一分支的服务端插件，并在其配置中设置 `proxy_mode=true`；后端不再监听玩家语音 TCP 连接，只通过 `voicechat:proxy_routing` 插件消息发送玩家状态、距离和目标 UUID。Velocity/BungeeCord 代理监听公共 `24454/TCP`，直接完成客户端认证、解密、路由和重新加密，普通距离/群组语音不经过子服链路。若子服扩展注册了麦克风、声音、距离事件或音频监听器，自动启用该子服的音频处理回传，以保证禁言、过滤、自定义路由与录音有效；插件主动播放的音频也通过代理发送。
 代理配置文件为 `voicechat-proxy.properties`，至少确认 `port=24454`，并将玩家可访问的 `voice_host` 设置为代理地址。代理的游戏端口和语音端口必须不同。
+
+玩家进入没有语音插件的子服时，会收到“语音聊天在此子服不可用”的提示，客户端停止发送音频并关闭旧语音连接。子服 UUID 映射缺失或矛盾时，停止该玩家语音，客户端提示服务器内部错误，代理控制台记录玩家和子服信息。默认 `allow_spectator_voice=false`，旁观者无法发送或接收语音；离开旁观模式会恢复。语音暂时受限时可以保留认证连接和控制心跳，但不会发送麦克风数据。
+
+当前集中模式的距离和群组目标仍限定在同一子服，没有全网跨子服群组目录。路由变化时发送完整快照，不变时每秒只发送短心跳。客户端、子服和代理必须同时升级到协议 1021，旧版认证包不兼容。
 集中代理目前只在 `tcp/26.3` 分支提供；`tcp/26.1` 和 `tcp/26.2` 仍支持 TCP 后端直连/普通 TCP 转发。
-本分支的协议兼容编号为 `1020`，原版 UDP 客户端会收到版本不兼容提示。
+本分支的协议兼容编号为 `1021`，原版 UDP 客户端会收到版本不兼容提示。
 
 ## 构建与验证
 
@@ -32,15 +36,21 @@ Minecraft 代理可以使用 26.3 分支内置的集中 TCP 语音代理。每�
 
 ```powershell
 .\gradlew.bat :fabric:build :paper:build :neoforge:build
+# 26.3 的 Bukkit / 代理插件：
+.\gradlew.bat :bukkit:build :velocity:build :bungeecord:build
 # 仅 26.1 / 26.2：
 .\gradlew.bat :forge:build
 # 不需要下载 Minecraft 或 Gradle 依赖的 TCP 和代理协议测试：
 pwsh -File scripts/test-tcp.ps1
 pwsh -File scripts/test-proxy.ps1
+pwsh -File scripts/test-runtime.ps1
+python tests/client/run.py
 ```
 
 产物位于各平台的 `build/libs/`，选择不带 `-sources` / `-javadoc` / `-dev` 后缀的模组或插件 JAR。
 Linux/macOS 可运行 `bash scripts/test-tcp.sh` 和 `bash scripts/test-proxy.sh`。网络测试覆盖拆包、粘包、非法长度、并发发送、多客户端路由、关闭及重连；代理测试覆盖 AES-GCM 篡改检测和认证字段校验。
+代理运行测试使用实际 TCP 连接验证认证防重放、UUID 映射、路由、插件回传和子服可用性；客户端生命周期测试编译实际连接类，用游戏/音频边界替身验证重连、设备重载及停发。加密与压缩评估见 [docs/crypto-evaluation.md](docs/crypto-evaluation.md)。
+
 协议和实现细节见 [docs/tcp-transport.md](docs/tcp-transport.md)。
 
 TCP 遇到丢包时会按顺序重传，因此网络不稳定时可能增加语音延迟。

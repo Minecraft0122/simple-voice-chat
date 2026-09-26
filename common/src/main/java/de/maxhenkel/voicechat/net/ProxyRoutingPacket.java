@@ -19,7 +19,9 @@ public class ProxyRoutingPacket implements Packet<ProxyRoutingPacket> {
     private UUID playerUUID;
     private long generation;
     private long updateSequence;
-    private boolean connected;
+    private int status;
+    private boolean relay;
+    private boolean snapshot = true;
     private float normalDistance;
     private float whisperDistance;
     private List<UUID> normalTargets = List.of();
@@ -29,12 +31,13 @@ public class ProxyRoutingPacket implements Packet<ProxyRoutingPacket> {
     public ProxyRoutingPacket() {
     }
 
-    public ProxyRoutingPacket(UUID playerUUID, long generation, long updateSequence, boolean connected, float normalDistance, float whisperDistance,
+    public ProxyRoutingPacket(UUID playerUUID, long generation, long updateSequence, int status, boolean relay, float normalDistance, float whisperDistance,
                               List<UUID> normalTargets, List<UUID> whisperTargets, List<UUID> groupTargets) {
         this.playerUUID = playerUUID;
         this.generation = generation;
         this.updateSequence = updateSequence;
-        this.connected = connected;
+        this.status = status;
+        this.relay = relay;
         this.normalDistance = normalDistance;
         this.whisperDistance = whisperDistance;
         this.normalTargets = List.copyOf(normalTargets);
@@ -46,8 +49,18 @@ public class ProxyRoutingPacket implements Packet<ProxyRoutingPacket> {
         return playerUUID;
     }
 
+    public int getStatus() { return status; }
+    public boolean isRelay() { return relay; }
+    public ProxyRoutingPacket heartbeat() { snapshot = false; return this; }
+    public boolean sameRoutes(ProxyRoutingPacket other) {
+        return other != null && status == other.status && relay == other.relay
+                && normalDistance == other.normalDistance && whisperDistance == other.whisperDistance
+                && normalTargets.equals(other.normalTargets) && whisperTargets.equals(other.whisperTargets)
+                && groupTargets.equals(other.groupTargets);
+    }
+
     public boolean isConnected() {
-        return connected;
+        return status == 0;
     }
 
     public long getGeneration() {
@@ -83,7 +96,10 @@ public class ProxyRoutingPacket implements Packet<ProxyRoutingPacket> {
         playerUUID = buf.readUUID();
         generation = buf.readLong();
         updateSequence = buf.readLong();
-        connected = buf.readBoolean();
+        snapshot = buf.readBoolean();
+        if (!snapshot) return this;
+        status = buf.readUnsignedByte();
+        relay = buf.readBoolean();
         normalDistance = buf.readFloat();
         whisperDistance = buf.readFloat();
         normalTargets = readTargets(buf);
@@ -112,7 +128,10 @@ public class ProxyRoutingPacket implements Packet<ProxyRoutingPacket> {
         buf.writeUUID(playerUUID);
         buf.writeLong(generation);
         buf.writeLong(updateSequence);
-        buf.writeBoolean(connected);
+        buf.writeBoolean(snapshot);
+        if (!snapshot) return;
+        buf.writeByte(status);
+        buf.writeBoolean(relay);
         buf.writeFloat(normalDistance);
         buf.writeFloat(whisperDistance);
         writeTargets(buf, normalTargets);

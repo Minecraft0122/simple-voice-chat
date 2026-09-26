@@ -102,6 +102,14 @@ public class PluginManager {
         return playerAudioListeners.getOrDefault(playerUuid, Collections.emptyList());
     }
 
+    /** Only backends with packet-dependent addons need to receive microphone audio. */
+    public boolean requiresBackendAudio() {
+        return !playerAudioListeners.isEmpty() || (events != null && (
+                events.containsKey(MicrophonePacketEvent.class) || events.containsKey(VoiceDistanceEvent.class)
+                || events.containsKey(LocationalSoundPacketEvent.class) || events.containsKey(EntitySoundPacketEvent.class)
+                || events.containsKey(StaticSoundPacketEvent.class)));
+    }
+
     public void onListenerAudio(UUID playerUuid, SoundPacket<?> packet) {
         if (playerUuid.equals(packet.getSender())) {
             return;

@@ -36,6 +36,15 @@ public class SimpleVoiceChatBungeecord extends VoiceProxy implements Listener {
         this.plugin = plugin;
     }
 
+    @Override public void sendToPlayer(UUID player, String channel, byte[] bytes) {
+        ProxiedPlayer p = plugin.getProxy().getPlayer(player);
+        if (p != null) p.sendData(channel, bytes);
+    }
+    @Override public void sendToBackend(UUID player, String channel, byte[] bytes) {
+        ProxiedPlayer p = plugin.getProxy().getPlayer(player);
+        if (p != null && p.getServer() != null) p.getServer().sendData(channel, bytes);
+    }
+
     @Override
     public InetSocketAddress getDefaultBackendSocket(UUID playerUUID) {
         ProxiedPlayer player = plugin.getProxy().getPlayer(playerUUID);
@@ -88,6 +97,9 @@ public class SimpleVoiceChatBungeecord extends VoiceProxy implements Listener {
         plugin.getProxy().registerChannel(SECRET_CHANNEL);
         plugin.getProxy().registerChannel(SECRET_CHANNEL_1_12);
         plugin.getProxy().registerChannel(PROXY_ROUTING_CHANNEL);
+        plugin.getProxy().registerChannel(PROXY_CONTROL_CHANNEL);
+        plugin.getProxy().registerChannel(PROXY_AUDIO_CHANNEL);
+        plugin.getProxy().registerChannel(AVAILABILITY_CHANNEL);
 
         plugin.getProxy().getPluginManager().registerCommand(plugin, new Command(VOICECHAT_COMMAND) {
             @Override
@@ -119,6 +131,9 @@ public class SimpleVoiceChatBungeecord extends VoiceProxy implements Listener {
         plugin.getProxy().unregisterChannel(SECRET_CHANNEL);
         plugin.getProxy().unregisterChannel(SECRET_CHANNEL_1_12);
         plugin.getProxy().unregisterChannel(PROXY_ROUTING_CHANNEL);
+        plugin.getProxy().unregisterChannel(PROXY_CONTROL_CHANNEL);
+        plugin.getProxy().unregisterChannel(PROXY_AUDIO_CHANNEL);
+        plugin.getProxy().unregisterChannel(AVAILABILITY_CHANNEL);
     }
 
     /**
@@ -137,6 +152,7 @@ public class SimpleVoiceChatBungeecord extends VoiceProxy implements Listener {
     @EventHandler
     public void onServerConnected(ServerSwitchEvent event) {
         onPlayerServerDisconnected(event.getPlayer().getUniqueId());
+        availability(event.getPlayer().getUniqueId(), de.maxhenkel.voicechat.voice.transport.VoiceAvailability.WAITING);
     }
 
     /**
@@ -161,6 +177,10 @@ public class SimpleVoiceChatBungeecord extends VoiceProxy implements Listener {
             fromServer = false;
         } else if (event.getReceiver() instanceof ProxiedPlayer player) {
             p = player;
+            if (event.getSender() != player.getServer()) {
+                if (isPrivateChannel(event.getTag()) || event.getTag().equals(SECRET_CHANNEL)) event.setCancelled(true);
+                return;
+            }
             fromServer = true;
         } else {
             return;
@@ -172,7 +192,7 @@ public class SimpleVoiceChatBungeecord extends VoiceProxy implements Listener {
                 return;
             }
             event.setCancelled(true);
-            if (!event.getTag().equals(PROXY_ROUTING_CHANNEL)) {
+            if (!isPrivateChannel(event.getTag())) {
                 event.getReceiver().unsafe().sendPacket(new PluginMessage(event.getTag(), replacement.array(), true));
             }
         } catch (IncompatibleVoiceChatException e) {

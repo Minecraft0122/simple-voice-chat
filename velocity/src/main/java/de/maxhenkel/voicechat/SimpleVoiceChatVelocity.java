@@ -51,6 +51,14 @@ public class SimpleVoiceChatVelocity extends VoiceProxy {
         super(new JavaLoggingLogger(logger));
     }
 
+    @Override public void sendToPlayer(UUID player, String channel, byte[] bytes) {
+        proxyServer.getPlayer(player).ifPresent(p -> p.sendPluginMessage(MinecraftChannelIdentifier.from(channel), bytes));
+    }
+    @Override public void sendToBackend(UUID player, String channel, byte[] bytes) {
+        proxyServer.getPlayer(player).flatMap(Player::getCurrentServer)
+                .ifPresent(server -> server.sendPluginMessage(MinecraftChannelIdentifier.from(channel), bytes));
+    }
+
     @Override
     public InetSocketAddress getDefaultBackendSocket(UUID playerUUID) {
         Optional<Player> player = proxyServer.getPlayer(playerUUID);
@@ -88,7 +96,10 @@ public class SimpleVoiceChatVelocity extends VoiceProxy {
                 MinecraftChannelIdentifier.from(REQUEST_SECRET_CHANNEL_1_12),
                 MinecraftChannelIdentifier.from(SECRET_CHANNEL),
                 MinecraftChannelIdentifier.from(SECRET_CHANNEL_1_12),
-                MinecraftChannelIdentifier.from(PROXY_ROUTING_CHANNEL)
+                MinecraftChannelIdentifier.from(PROXY_ROUTING_CHANNEL),
+                MinecraftChannelIdentifier.from(PROXY_CONTROL_CHANNEL),
+                MinecraftChannelIdentifier.from(PROXY_AUDIO_CHANNEL),
+                MinecraftChannelIdentifier.from(AVAILABILITY_CHANNEL)
         );
         proxyServer.getCommandManager().register(proxyServer.getCommandManager().metaBuilder(VOICECHAT_COMMAND).plugin(this).build(), (SimpleCommand) invocation -> {
             onVoicechatCommand(new CommandSender() {
@@ -130,6 +141,7 @@ public class SimpleVoiceChatVelocity extends VoiceProxy {
             return;
         }
         onPlayerServerDisconnected(event.getPlayer().getUniqueId());
+        availability(event.getPlayer().getUniqueId(), de.maxhenkel.voicechat.voice.transport.VoiceAvailability.WAITING);
     }
 
     /**
@@ -157,6 +169,11 @@ public class SimpleVoiceChatVelocity extends VoiceProxy {
             fromServer = false;
         } else if (event.getTarget() instanceof Player player) {
             p = player;
+            if (!(event.getSource() instanceof ServerConnection source)
+                    || player.getCurrentServer().isEmpty() || source != player.getCurrentServer().get()) {
+                if (isPrivateChannel(event.getIdentifier().getId()) || event.getIdentifier().getId().equals(SECRET_CHANNEL)) event.setResult(PluginMessageEvent.ForwardResult.handled());
+                return;
+            }
             fromServer = true;
         } else {
             return;
@@ -168,7 +185,7 @@ public class SimpleVoiceChatVelocity extends VoiceProxy {
                 return;
             }
             event.setResult(PluginMessageEvent.ForwardResult.handled());
-            if (!event.getIdentifier().getId().equals(PROXY_ROUTING_CHANNEL)) {
+            if (!isPrivateChannel(event.getIdentifier().getId())) {
                 event.getTarget().sendPluginMessage(event.getIdentifier(), replacement.array());
             }
         } catch (IncompatibleVoiceChatException e) {

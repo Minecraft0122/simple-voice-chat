@@ -27,6 +27,28 @@ public abstract class VoiceProxy {
 
     public static final String SECRET_CHANNEL = "voicechat:secret";
     public static final String SECRET_CHANNEL_1_12 = "vc:secret";
+    public static final String AVAILABILITY_CHANNEL = "voicechat:availability";
+    public static final String PROXY_CONTROL_CHANNEL = "voicechat:proxy_control";
+    public static final String PROXY_AUDIO_CHANNEL = "voicechat:proxy_audio";
+    public static boolean isPrivateChannel(String channel) {
+        return channel.equals(PROXY_CONTROL_CHANNEL) || channel.equals(PROXY_AUDIO_CHANNEL) || channel.equals(PROXY_ROUTING_CHANNEL) || channel.equals(AVAILABILITY_CHANNEL);
+    }
+    public abstract void sendToPlayer(UUID player, String channel, byte[] bytes);
+    public abstract void sendToBackend(UUID player, String channel, byte[] bytes);
+    public String backendId(UUID player) {
+        InetSocketAddress address = getDefaultBackendSocket(player);
+        return address == null ? null : address.toString();
+    }
+    public void availability(UUID player, int status) {
+        sendToPlayer(player, AVAILABILITY_CHANNEL, new byte[]{(byte) status});
+    }
+    public void routingChanged(UUID player) {
+        if (voiceProxyServer != null) voiceProxyServer.routingChanged(player);
+    }
+    public void relayAudio(UUID player, byte[] data) {
+        if (voiceProxyServer != null) voiceProxyServer.relayBackendAudio(player, data);
+    }
+
     public static final String PROXY_ROUTING_CHANNEL = "voicechat:proxy_routing";
     public static final String REQUEST_SECRET_CHANNEL = "voicechat:request_secret";
     public static final String REQUEST_SECRET_CHANNEL_1_12 = "vc:request_secret";
@@ -65,6 +87,7 @@ public abstract class VoiceProxy {
      */
     public int getPort() {
         int port = getConfig().port.get();
+        if (port == 0) throw new IllegalArgumentException("Voice proxy port=0 is forbidden; configure a fixed TCP port (1..65535)");
         if (port == -1) {
             port = 24454;
         }
@@ -85,6 +108,9 @@ public abstract class VoiceProxy {
         } catch (Exception e) {
             voiceChatLogger.error("Error loading config", e);
         }
+        // Stop the existing endpoint before validating a reloaded configuration.
+        if (voiceProxyServer != null) voiceProxyServer.interrupt();
+        getPort();
         checkCorrectHost();
 
         if (voiceProxyServer != null) {

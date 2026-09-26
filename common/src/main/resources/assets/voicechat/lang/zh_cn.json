@@ -205,5 +205,11 @@
   "cloth_config.voicechat.config.group_player_icon_pos_y": "群组通话 HUD 图标 Y 轴坐标",
   "cloth_config.voicechat.config.group_player_icon_pos_y.description": "群组通话 HUD 图标的 Y 轴位置\n负值表示将其锚定在底部",
   "cloth_config.voicechat.config.show_own_group_icon": "显示自己的群组图标",
-  "cloth_config.voicechat.config.show_own_group_icon.description": "当处于群组中时是否显示自己的图标"
+  "cloth_config.voicechat.config.show_own_group_icon.description": "当处于群组中时是否显示自己的图标",
+  "message.voicechat.available": "此子服的语音聊天已可用。",
+  "message.voicechat.waiting_for_server": "正在等待此子服启用语音聊天。",
+  "message.voicechat.unavailable_on_server": "语音聊天在此子服不可用，语音插件未安装或未启用。",
+  "message.voicechat.server_internal_error": "服务器内部错误，语音聊天已停止。请联系管理员。",
+  "message.voicechat.spectator_disabled": "旁观模式下无法使用语音聊天。",
+  "message.voicechat.voice_disabled": "语音聊天已停用。"
 }

@@ -226,5 +226,11 @@
   "cloth_config.voicechat.config.group_player_icon_pos_y": "Group chat HUD icon Y position",
   "cloth_config.voicechat.config.group_player_icon_pos_y.description": "The Y position of the player icons in the group chat HUD.\nNegative values mean anchoring to the bottom instead.",
   "cloth_config.voicechat.config.show_own_group_icon": "Show yourself in the group chat HUD",
-  "cloth_config.voicechat.config.show_own_group_icon.description": "If your own player icon should be displayed in the group chat HUD when you are in a group."
+  "cloth_config.voicechat.config.show_own_group_icon.description": "If your own player icon should be displayed in the group chat HUD when you are in a group.",
+  "message.voicechat.available": "Voice chat is available on this server.",
+  "message.voicechat.waiting_for_server": "Waiting for this server to enable voice chat.",
+  "message.voicechat.unavailable_on_server": "Voice chat is unavailable on this server. The voice plugin is missing or disabled.",
+  "message.voicechat.server_internal_error": "Server internal error. Voice chat has been stopped. Please contact an administrator.",
+  "message.voicechat.spectator_disabled": "Voice chat is unavailable in spectator mode.",
+  "message.voicechat.voice_disabled": "Voice chat is disabled."
 }

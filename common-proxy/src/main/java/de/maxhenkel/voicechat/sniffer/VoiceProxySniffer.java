@@ -1,274 +1,191 @@
 package de.maxhenkel.voicechat.sniffer;
 
 import de.maxhenkel.voicechat.VoiceProxy;
-
-import java.net.InetAddress;
+import de.maxhenkel.voicechat.voice.transport.VoiceAvailability;
 import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
-import java.util.Map;
-import java.util.List;
-import java.util.UUID;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
-/**
- * VoiceProxySniffer implements a platform-independent way of sniffing
- * the Simple Voice Chat packets as they are transmitted through plugin channels.
- */
+/** Accepts identity and routing only from the player's current backend connection. */
 public class VoiceProxySniffer {
-
-    /**
-     * Maps the backend server player UUID to the proxy player UUID.
-     * This is useful when UUID forwarding has not been properly configured.
-     */
+    private final VoiceProxy voiceProxy;
     private final Map<UUID, UUID> playerUUIDMap = new ConcurrentHashMap<>();
-
-    /**
-     * Maps a given player UUID to the address and sniffed port of the backend voice chat server.
-     */
-    private final Map<UUID, InetSocketAddress> backendSocketMap = new ConcurrentHashMap<>();
-
-    /**
-     * Maps a given player UUID to the sniffed compatibility version.
-     */
+    private final Map<UUID, UUID> backendPlayerMap = new ConcurrentHashMap<>();
+    private final Map<UUID, String> backendIds = new ConcurrentHashMap<>();
     private final Map<UUID, Integer> compatibilityVersionMap = new ConcurrentHashMap<>();
     private final Map<UUID, byte[]> secretMap = new ConcurrentHashMap<>();
-    private final Map<UUID, RoutingState> routingStateMap = new ConcurrentHashMap<>();
-    private final Map<UUID, Long> routingGenerationMap = new ConcurrentHashMap<>();
-    private final Map<UUID, Long> routingSequenceMap = new ConcurrentHashMap<>();
-    private final Map<UUID, Long> routingTimestampMap = new ConcurrentHashMap<>();
-    private static final long ROUTING_STATE_TIMEOUT_MILLIS = 3_000L;
+    private final Map<UUID, RoutingState> routes = new ConcurrentHashMap<>();
+    private final Map<UUID, Long> requestedAt = new ConcurrentHashMap<>();
+    private final Map<UUID, Long> retiredIdentities = new ConcurrentHashMap<>();
+    private final Set<UUID> errors = ConcurrentHashMap.newKeySet();
 
-    private final VoiceProxy voiceProxy;
-
-    public VoiceProxySniffer(VoiceProxy voiceProxy) {
-        this.voiceProxy = voiceProxy;
+    public VoiceProxySniffer(VoiceProxy proxy) { voiceProxy = proxy; }
+    // Deliberately no UUID fallback: absence is an error, never an identity assertion.
+    public UUID getMappedPlayerUUID(UUID backendPlayer) { return playerUUIDMap.get(backendPlayer); }
+    public boolean recentlyDisconnected(UUID backendPlayer) {
+        Long until = retiredIdentities.get(backendPlayer);
+        return until != null && System.currentTimeMillis() < until;
     }
+    public UUID getBackendPlayerUUID(UUID player) { return backendPlayerMap.get(player); }
+    @Deprecated public InetSocketAddress getBackendSocket(UUID player) { return null; }
+    @Deprecated public void resetBackendSocket(UUID player) {}
 
-    /**
-     * Returns the players UUID on the proxy server.
-     *
-     * @param playerUUID the UUID of the player on the backend server
-     * @return the UUID of the player on the proxy
-     */
-    public UUID getMappedPlayerUUID(UUID playerUUID) {
-        return playerUUIDMap.getOrDefault(playerUUID, playerUUID);
-    }
-
-    /**
-     * Returns the address and sniffed port of the backend voice chat server.
-     *
-     * @param playerUUID the UUID of the player on the proxy
-     * @return the backend voice chat socket address, which may be unresolved, <code>null</code> if the secret handshake was not sniffed yet
-     */
-    public InetSocketAddress getBackendSocket(UUID playerUUID) {
-        return backendSocketMap.get(playerUUID);
-    }
-
-    /**
-     * Forgets the backend voice chat socket of a given player.
-     * No packets are bridged for this player until the backend server times them out and sends a new secret.
-     *
-     * @param playerUUID the UUID of the player on the proxy
-     */
-    public void resetBackendSocket(UUID playerUUID) {
-        backendSocketMap.remove(playerUUID);
-    }
-
-    /**
-     * Called whenever a PluginMessage has been received by the proxy.
-     *
-     * @param channel    the channel on which the message was received
-     * @param fromServer whether the message was sent from the server
-     * @param message    the contents of the received message
-     * @param playerUUID the UUID of the player that sent or received the message
-     * @return ByteBuffer if the plugin message should be replaced, <code>null</code> otherwise
-     */
-    public ByteBuffer onPluginMessage(String channel, boolean fromServer, ByteBuffer message, UUID playerUUID) throws IncompatibleVoiceChatException {
-        if (!fromServer && (channel.equals(VoiceProxy.REQUEST_SECRET_CHANNEL) || channel.equals(VoiceProxy.REQUEST_SECRET_CHANNEL_1_12))) {
-            return handleRequestSecretPacket(message, playerUUID);
+    public synchronized ByteBuffer onPluginMessage(String channel, boolean fromServer, ByteBuffer message, UUID player) throws IncompatibleVoiceChatException {
+        if (!fromServer && VoiceProxy.isPrivateChannel(channel)) return ByteBuffer.allocate(0);
+        if (!fromServer && channel.equals(VoiceProxy.REQUEST_SECRET_CHANNEL)) {
+            if (message.remaining() != 4) throw new IncompatibleVoiceChatException("Invalid secret request");
+            compatibilityVersionMap.put(player, message.getInt());
+            requestedAt.put(player, System.currentTimeMillis());
+            voiceProxy.availability(player, VoiceAvailability.WAITING);
+            return null;
         }
-        if (fromServer && (channel.equals(VoiceProxy.SECRET_CHANNEL) || channel.equals(VoiceProxy.SECRET_CHANNEL_1_12))) {
-            return handleSecretPacket(message, playerUUID);
-        }
-        if (fromServer && channel.equals(VoiceProxy.PROXY_ROUTING_CHANNEL)) {
-            try {
-                handleRoutingPacket(message, playerUUID);
-            } catch (RuntimeException e) {
-                throw new IncompatibleVoiceChatException("Malformed proxy routing packet", e);
+        if (!fromServer) return null;
+        try {
+            if (channel.equals(VoiceProxy.SECRET_CHANNEL)) return handleSecret(message, player);
+            if (channel.equals(VoiceProxy.PROXY_ROUTING_CHANNEL)) {
+                handleRouting(message.slice(), player);
+                return ByteBuffer.allocate(0);
             }
-            return ByteBuffer.allocate(0);
+            if (channel.equals(VoiceProxy.PROXY_AUDIO_CHANNEL)) {
+                byte[] bytes = new byte[message.remaining()]; message.get(bytes);
+                voiceProxy.relayAudio(player, bytes);
+                return ByteBuffer.allocate(0);
+            }
+            if (channel.equals(VoiceProxy.PROXY_CONTROL_CHANNEL)) return ByteBuffer.allocate(0);
+        } catch (RuntimeException e) {
+            internalError(player, e.getMessage());
+            throw new IncompatibleVoiceChatException("Invalid backend voice metadata", e);
         }
         return null;
     }
 
-    /**
-     * Called whenever a Player disconnects from a backend server.
-     *
-     * @param playerUUID the UUID of the player that disconnected
-     */
-    public void onPlayerServerDisconnect(UUID playerUUID) {
-        backendSocketMap.remove(playerUUID);
-        compatibilityVersionMap.remove(playerUUID);
-        // Remove by the proxies known player UUID e.g., the value of the map
-        playerUUIDMap.values().remove(playerUUID);
-        secretMap.remove(playerUUID);
-        routingStateMap.remove(playerUUID);
-        routingGenerationMap.remove(playerUUID);
-        routingSequenceMap.remove(playerUUID);
-        routingTimestampMap.remove(playerUUID);
-    }
-
-    /**
-     * Called whenever a SecretPacket has been sniffed.
-     *
-     * @param message    the SecretPacket in bytes
-     * @param playerUUID the UUID of the player this packet was intended for
-     */
-    private ByteBuffer handleSecretPacket(ByteBuffer message, UUID playerUUID) throws IncompatibleVoiceChatException {
-        Integer compatibilityVersion = compatibilityVersionMap.get(playerUUID);
-        if (compatibilityVersion == null) {
-            throw new IncompatibleVoiceChatException("No compatibility version found");
+    private ByteBuffer handleSecret(ByteBuffer message, UUID player) throws IncompatibleVoiceChatException {
+        Integer version = compatibilityVersionMap.get(player);
+        if (version == null || version != VoiceProxy.COMPATIBILITY_VERSION) {
+            internalError(player, "Missing or incompatible client protocol version");
+            throw new IncompatibleVoiceChatException("Matching TCP client required");
         }
-        SniffedSecretPacket packet = SniffedSecretPacket.fromBytes(message, compatibilityVersion);
-        playerUUIDMap.put(packet.getPlayerUUID(), playerUUID);
-        secretMap.put(playerUUID, packet.getSecret());
-        routingStateMap.remove(playerUUID);
-        routingGenerationMap.remove(playerUUID);
-        routingSequenceMap.remove(playerUUID);
-        routingTimestampMap.remove(playerUUID);
-
-        if (packet.getServerPort() > 0 && packet.getServerPort() <= 65535) {
-            InetSocketAddress backendSocket = createBackendSocket(playerUUID, packet.getServerPort());
-            if (backendSocket == null) {
-                resetBackendSocket(playerUUID);
-            } else {
-                backendSocketMap.put(playerUUID, backendSocket);
-            }
-        } else {
-            resetBackendSocket(playerUUID);
+        SniffedSecretPacket packet = SniffedSecretPacket.fromBytes(message, version);
+        if (packet.getServerPort() != -1) {
+            internalError(player, "Backend must enable proxy_mode=true");
+            throw new IncompatibleVoiceChatException("Backend is not in central proxy mode");
         }
-
-        // The player reconnects with a new socket, so the bridge of the previous session is outdated
-        voiceProxy.disconnectBridge(playerUUID);
+        UUID mapped = playerUUIDMap.get(packet.getPlayerUUID());
+        if (mapped != null && !mapped.equals(player)) throw new IllegalArgumentException("Conflicting backend player UUID");
+        String backend = voiceProxy.backendId(player);
+        if (backend == null) throw new IllegalArgumentException("No current backend");
+        voiceProxy.disconnectBridge(player);
+        UUID old = backendPlayerMap.put(player, packet.getPlayerUUID());
+        if (old != null) playerUUIDMap.remove(old, player);
+        playerUUIDMap.put(packet.getPlayerUUID(), player);
+        retiredIdentities.remove(packet.getPlayerUUID());
+        backendIds.put(player, backend);
+        secretMap.put(player, packet.getSecret());
+        routes.remove(player);
+        errors.remove(player);
+        requestedAt.put(player, System.currentTimeMillis());
         return packet.patch(voiceProxy);
     }
 
-    private void handleRoutingPacket(ByteBuffer message, UUID proxyPlayerUUID) {
-        ByteBuffer data = message.slice();
-        UUID backendPlayerUUID = readUUID(data);
-        UUID mappedProxyPlayerUUID = playerUUIDMap.get(backendPlayerUUID);
-        if (mappedProxyPlayerUUID != null && !mappedProxyPlayerUUID.equals(proxyPlayerUUID)) {
-            throw new IllegalArgumentException("Proxy routing player UUID does not match the plugin message player");
+    private void handleRouting(ByteBuffer data, UUID player) {
+        UUID backendPlayer = readUUID(data);
+        if (!player.equals(playerUUIDMap.get(backendPlayer)) || !backendPlayer.equals(backendPlayerMap.get(player))) {
+            throw new IllegalArgumentException("Backend did not upload a matching player UUID mapping: " + backendPlayer);
         }
+        if (!Objects.equals(backendIds.get(player), voiceProxy.backendId(player))) throw new IllegalArgumentException("Stale backend identity");
         long generation = data.getLong();
-        long updateSequence = data.getLong();
-        UUID mappedPlayer = mappedProxyPlayerUUID == null ? proxyPlayerUUID : mappedProxyPlayerUUID;
-        Long previousGeneration = routingGenerationMap.get(mappedPlayer);
-        Long previousSequence = routingSequenceMap.get(mappedPlayer);
-        if (previousGeneration != null && previousGeneration == generation && previousSequence != null && updateSequence <= previousSequence) {
-            return;
+        long sequence = data.getLong();
+        boolean snapshot = data.get() != 0;
+        RoutingState previous = routes.get(player);
+        if (previous != null) {
+            if (generation != previous.generation()) throw new IllegalArgumentException("Backend generation changed without a new identity handshake");
+            if (sequence <= previous.sequence()) return;
         }
-        if (previousGeneration != null && previousGeneration != generation) {
-            routingSequenceMap.remove(mappedPlayer);
+        RoutingState next;
+        long now = System.currentTimeMillis();
+        if (!snapshot) {
+            if (previous == null || data.hasRemaining()) throw new IllegalArgumentException("Heartbeat without routing snapshot");
+            next = new RoutingState(backendPlayer, generation, sequence, now, previous.status(), previous.relay(),
+                    previous.normalDistance(), previous.whisperDistance(), previous.normalTargets(), previous.whisperTargets(), previous.groupTargets());
+        } else {
+            int status = data.get() & 255;
+            boolean relay = data.get() != 0;
+            float normal = data.getFloat(), whisper = data.getFloat();
+            if (status > VoiceAvailability.DISABLED || !Float.isFinite(normal) || !Float.isFinite(whisper) || normal < 0 || whisper < 0) throw new IllegalArgumentException("Invalid routing state");
+            List<UUID> normals = readUUIDs(data), whispers = readUUIDs(data), groups = readUUIDs(data);
+            if (data.hasRemaining()) throw new IllegalArgumentException("Trailing routing data");
+            next = new RoutingState(backendPlayer, generation, sequence, now, status, relay, normal, whisper, normals, whispers, groups);
         }
-        boolean connected = data.get() != 0;
-        float normalDistance = data.getFloat();
-        float whisperDistance = data.getFloat();
-        if (!Float.isFinite(normalDistance) || !Float.isFinite(whisperDistance)
-                || normalDistance < 0F || whisperDistance < 0F) {
-            throw new IllegalArgumentException("Invalid proxy routing distance");
-        }
-        List<UUID> normalTargets = readUUIDs(data);
-        List<UUID> whisperTargets = readUUIDs(data);
-        List<UUID> groupTargets = readUUIDs(data);
-        routingGenerationMap.put(mappedPlayer, generation);
-        routingSequenceMap.put(mappedPlayer, updateSequence);
-        routingTimestampMap.put(mappedPlayer, System.currentTimeMillis());
-        routingStateMap.put(mappedPlayer, new RoutingState(mappedPlayer, connected, normalDistance, whisperDistance, normalTargets, whisperTargets, groupTargets));
+        routes.put(player, next);
+        voiceProxy.routingChanged(player);
+        requestedAt.remove(player);
+        errors.remove(player);
     }
 
-    private static UUID readUUID(ByteBuffer buffer) {
-        return new UUID(buffer.getLong(), buffer.getLong());
+    public synchronized void checkBackendTimeouts() {
+        long now = System.currentTimeMillis();
+        retiredIdentities.entrySet().removeIf(entry -> entry.getValue() < now);
+        requestedAt.entrySet().removeIf(entry -> {
+            if (now - entry.getValue() < 5000L) return false;
+            UUID player = entry.getKey();
+            if (secretMap.containsKey(player)) internalError(player, "Backend did not upload usable UUID/routing metadata");
+            else voiceProxy.availability(player, VoiceAvailability.UNAVAILABLE);
+            return true;
+        });
     }
 
-    private static List<UUID> readUUIDs(ByteBuffer buffer) {
-        int count = readVarInt(buffer);
-        if (count < 0 || count > 4096 || buffer.remaining() < count * 16L) {
-            throw new IllegalArgumentException("Invalid proxy routing target count: " + count);
+    public synchronized void internalError(UUID player, String reason) {
+        routes.remove(player);
+        if (errors.add(player)) {
+            voiceProxy.getLogger().error("Voice chat disabled for player {} on backend {}: {}", player, voiceProxy.backendId(player), reason);
+            voiceProxy.availability(player, VoiceAvailability.INTERNAL_ERROR);
         }
-        java.util.ArrayList<UUID> result = new java.util.ArrayList<>(count);
-        for (int i = 0; i < count; i++) {
-            result.add(readUUID(buffer));
-        }
-        return List.copyOf(result);
+        voiceProxy.disconnectBridge(player);
     }
 
-    private static int readVarInt(ByteBuffer buffer) {
-        int result = 0;
-        int shift = 0;
-        while (shift < 35) {
-            int value = buffer.get() & 0xFF;
-            result |= (value & 0x7F) << shift;
-            if ((value & 0x80) == 0) return result;
+    public synchronized void onPlayerServerDisconnect(UUID player) {
+        UUID backendPlayer = backendPlayerMap.remove(player);
+        if (backendPlayer != null) {
+            playerUUIDMap.remove(backendPlayer, player);
+            retiredIdentities.put(backendPlayer, System.currentTimeMillis() + 10_000L);
+        }
+        backendIds.remove(player);
+        compatibilityVersionMap.remove(player);
+        secretMap.remove(player);
+        routes.remove(player);
+        requestedAt.remove(player);
+        errors.remove(player);
+    }
+
+    public byte[] getSecret(UUID player) {
+        byte[] key = secretMap.get(player);
+        return key == null ? null : key.clone();
+    }
+    public RoutingState getRoutingState(UUID player) {
+        RoutingState state = routes.get(player);
+        return state == null || System.currentTimeMillis() - state.updatedAt() > 3000L ? null : state;
+    }
+    public boolean sameBackend(UUID first, UUID second) {
+        String backend = backendIds.get(first);
+        return backend != null && backend.equals(backendIds.get(second));
+    }
+    public record RoutingState(UUID backendPlayer, long generation, long sequence, long updatedAt, int status, boolean relay,
+                               float normalDistance, float whisperDistance, List<UUID> normalTargets, List<UUID> whisperTargets, List<UUID> groupTargets) {
+        public boolean connected() { return status == VoiceAvailability.AVAILABLE; }
+    }
+    private static UUID readUUID(ByteBuffer b) { return new UUID(b.getLong(), b.getLong()); }
+    private static List<UUID> readUUIDs(ByteBuffer b) {
+        int count = 0, shift = 0;
+        while (true) {
+            if (shift >= 35) throw new IllegalArgumentException("Invalid routing count");
+            int n = b.get() & 255; count |= (n & 127) << shift;
+            if ((n & 128) == 0) break;
             shift += 7;
         }
-        throw new IllegalArgumentException("Proxy routing varint is too long");
+        if (count < 0 || count > 4096 || count * 16L > b.remaining()) throw new IllegalArgumentException("Invalid routing targets");
+        List<UUID> result = new ArrayList<>(count);
+        for (int i = 0; i < count; i++) result.add(readUUID(b));
+        return List.copyOf(result);
     }
-
-    public byte[] getSecret(UUID playerUUID) {
-        byte[] secret = secretMap.get(playerUUID);
-        return secret == null ? null : secret.clone();
-    }
-
-    public RoutingState getRoutingState(UUID playerUUID) {
-        RoutingState state = routingStateMap.get(playerUUID);
-        Long updatedAt = routingTimestampMap.get(playerUUID);
-        if (state == null || updatedAt == null || System.currentTimeMillis() - updatedAt > ROUTING_STATE_TIMEOUT_MILLIS) return null;
-        return state.mapTargets(this);
-    }
-
-    public record RoutingState(UUID playerUUID, boolean connected, float normalDistance, float whisperDistance,
-                               List<UUID> normalTargets, List<UUID> whisperTargets, List<UUID> groupTargets) {
-        private RoutingState mapTargets(VoiceProxySniffer sniffer) {
-            return new RoutingState(playerUUID, connected, normalDistance, whisperDistance,
-                    map(normalTargets, sniffer), map(whisperTargets, sniffer), map(groupTargets, sniffer));
-        }
-
-        private static List<UUID> map(List<UUID> targets, VoiceProxySniffer sniffer) {
-            return targets.stream().map(target -> sniffer.playerUUIDMap.getOrDefault(target, target)).toList();
-        }
-    }
-
-    /**
-     * Creates the address of the backend voice chat server, which may be unresolved.
-     * Unresolved addresses are resolved by the bridge itself to keep the name resolution off the thread that proxies the voice chat packets.
-     *
-     * @param playerUUID the UUID of the player on the proxy
-     * @param serverPort the sniffed UDP port of the backend voice chat server
-     * @return the backend voice chat socket or <code>null</code> if the player is not connected to a backend server
-     */
-    private InetSocketAddress createBackendSocket(UUID playerUUID, int serverPort) {
-        InetSocketAddress backendSocket = voiceProxy.getDefaultBackendSocket(playerUUID);
-        if (backendSocket == null) {
-            return null;
-        }
-
-        InetAddress backendAddress = backendSocket.getAddress();
-        if (backendAddress == null) {
-            return InetSocketAddress.createUnresolved(backendSocket.getHostString(), serverPort);
-        }
-        return new InetSocketAddress(backendAddress, serverPort);
-    }
-
-    /**
-     * Called whenever a RequestSecretPacket has been sniffed.
-     *
-     * @param message    the RequestSecretPacket in bytes
-     * @param playerUUID the UUID of the player this packet was from
-     */
-    private ByteBuffer handleRequestSecretPacket(ByteBuffer message, UUID playerUUID) {
-        compatibilityVersionMap.put(playerUUID, message.getInt());
-        return null;
-    }
-
 }

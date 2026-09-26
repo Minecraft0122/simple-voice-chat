@@ -20,7 +20,7 @@ public class ProxyConfig {
                         "Audio packets are always transmitted via the TCP protocol on the port number",
                         "specified here, independently of other networking used for the game server.",
                         "Use a separate port from the Minecraft proxy and forward it as TCP.",
-                        "Set this to '0' to let the operating system select an available TCP port."
+                        "Port 0 is forbidden and prevents the voice service from starting."
                 );
 
         bindAddress = builder

@@ -41,6 +41,9 @@ public class ServerVoiceEvents {
         CommonCompatibilityManager.INSTANCE.onServerVoiceChatDisconnected(this::serverVoiceChatDisconnected);
         CommonCompatibilityManager.INSTANCE.onPlayerCompatibilityCheckSucceeded(this::playerCompatibilityCheckSucceeded);
 
+        CommonCompatibilityManager.INSTANCE.getNetManager().proxyControlChannel.setServerListener((player, packet) -> {
+            if (server != null) server.handleProxyControl(player, packet.getData());
+        });
         CommonCompatibilityManager.INSTANCE.getNetManager().requestSecretChannel.setServerListener((player, packet) -> {
             Voicechat.LOGGER.info("Received secret request of {} ({})", player.getName().getString(), packet.getCompatibilityVersion());
             clientCompatibilities.put(player.getUUID(), packet.getCompatibilityVersion());
@@ -117,11 +120,7 @@ public class ServerVoiceEvents {
 
         int advertisedPort = Voicechat.SERVER_CONFIG.proxyMode.get() ? -1 : server.getPort();
         NetManager.sendToClient(player, new SecretPacket(player, secret, advertisedPort, Voicechat.SERVER_CONFIG, voiceHost));
-        if (Voicechat.SERVER_CONFIG.proxyMode.get()) {
-            server.onPlayerVoicechatConnect(player);
-            CommonCompatibilityManager.INSTANCE.emitServerVoiceChatConnectedEvent(player);
-            PluginManager.instance().onPlayerConnected(player);
-        }
+
         Voicechat.LOGGER.info("Sent secret to {}", player.getName().getString());
     }
 

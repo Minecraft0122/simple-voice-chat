@@ -34,7 +34,7 @@ public class ClientVoicechat {
     @Nullable
     private MicThread micThread;
     @Nullable
-    private ClientVoicechatConnection connection;
+    private volatile ClientVoicechatConnection connection;
     @Nullable
     private InitializationData initializationData;
     @Nullable
@@ -44,6 +44,40 @@ public class ClientVoicechat {
     private volatile long connectionGeneration;
     private volatile Thread reconnectThread;
     private volatile boolean closed;
+    private boolean notifyingTransportFailure;
+    private volatile int availability = de.maxhenkel.voicechat.voice.transport.VoiceAvailability.WAITING;
+
+    public int getAvailability() { return availability; }
+
+    public boolean canSendAudio() {
+        return availability == de.maxhenkel.voicechat.voice.transport.VoiceAvailability.AVAILABLE;
+    }
+
+    /** A game-channel wait marks a backend change; never retry the previous backend's credentials. */
+    public void resetBackend() {
+        onVoiceChatDisconnected();
+        initializationData = null;
+        setAvailability(de.maxhenkel.voicechat.voice.transport.VoiceAvailability.WAITING);
+        ClientCompatibilityManager.INSTANCE.emitVoiceChatDisconnectedEvent();
+    }
+
+    public void setAvailability(int status) {
+        int previous = availability;
+        availability = status;
+        if (!canSendAudio()) closeMicThread();
+        if (status == de.maxhenkel.voicechat.voice.transport.VoiceAvailability.UNAVAILABLE
+                || status == de.maxhenkel.voicechat.voice.transport.VoiceAvailability.INTERNAL_ERROR) {
+            onVoiceChatDisconnected();
+            initializationData = null;
+            ClientCompatibilityManager.INSTANCE.emitVoiceChatDisconnectedEvent();
+        } else if (canSendAudio() && connection != null && connection.isInitialized() && micThread == null) {
+            startMicThread(connection);
+        }
+        if (previous != status && status != de.maxhenkel.voicechat.voice.transport.VoiceAvailability.WAITING) {
+            ChatUtils.sendModMessage(Component.translatable(de.maxhenkel.voicechat.voice.transport.VoiceAvailability.translationKey(status)));
+        }
+    }
+
     @Nullable
     private volatile ClientVoicechatConnection failedConnection;
 
@@ -56,11 +90,17 @@ public class ClientVoicechat {
     }
 
     public void onVoiceChatConnected(ClientVoicechatConnection connection) {
-        startMicThread(connection);
+        synchronized (connectionLock) {
+            if (this.connection != connection) return;
+            failedConnection = null;
+            interruptReconnectLocked();
+        }
+        if (canSendAudio()) startMicThread(connection);
     }
 
     public void onVoiceChatDisconnected() {
         closeMicThread();
+        if (notifyingTransportFailure) return;
         ClientVoicechatConnection old;
         synchronized (connectionLock) {
             old = connection;
@@ -82,6 +122,7 @@ public class ClientVoicechat {
             old = connection;
             connection = null;
             initializationData = data;
+            availability = de.maxhenkel.voicechat.voice.transport.VoiceAvailability.WAITING;
         }
         if (old != null) old.close();
         Voicechat.LOGGER.info("Connecting to voice chat server: '{}:{}'", data.getServerIP(), data.getServerPort());
@@ -103,6 +144,7 @@ public class ClientVoicechat {
             if (closed || connection != failed) return;
             connection = null;
             failedConnection = failed;
+            availability = de.maxhenkel.voicechat.voice.transport.VoiceAvailability.WAITING;
             long generation = ++connectionGeneration;
             InitializationData data = initializationData;
             interruptReconnectLocked();
@@ -117,7 +159,12 @@ public class ClientVoicechat {
                 if (failedConnection != failed) return;
                 failedConnection = null;
             }
-            ClientCompatibilityManager.INSTANCE.emitVoiceChatDisconnectedEvent();
+            notifyingTransportFailure = true;
+            try {
+                ClientCompatibilityManager.INSTANCE.emitVoiceChatDisconnectedEvent();
+            } finally {
+                notifyingTransportFailure = false;
+            }
         });
     }
 
@@ -240,7 +287,7 @@ public class ClientVoicechat {
         reloadSoundManager();
 
         Voicechat.LOGGER.info("Starting microphone thread");
-        if (connection != null) {
+        if (connection != null && canSendAudio()) {
             startMicThread(connection);
         }
     }

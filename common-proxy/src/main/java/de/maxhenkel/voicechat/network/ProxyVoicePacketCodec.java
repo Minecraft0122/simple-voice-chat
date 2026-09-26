@@ -58,13 +58,34 @@ final class ProxyVoicePacketCodec {
             payload.get(authSecret);
             return new DecodedPacket(authPlayer, type, null, 0L, false, authSecret);
         }
+        if (type == 0x0C) {
+            if (payload.remaining() != 32) throw new IllegalArgumentException("Invalid authentication proof");
+            byte[] proof = new byte[32]; payload.get(proof);
+            return new DecodedPacket(player, type, null, 0L, false, proof);
+        }
         if (type == CONNECTION_CHECK_PACKET) {
             return new DecodedPacket(player, type, null, 0L, false, null);
         }
-        if (type == 0x07 || type == 0x08) {
+        if (type == 0x07) {
+            if (payload.remaining() != 24) throw new IllegalArgumentException("Invalid pong payload");
+            return new DecodedPacket(player, type, null, 0L, false, null, plaintext);
+        }
+        if (type == 0x08) {
             return new DecodedPacket(player, type, null, 0L, false, null);
         }
         throw new IllegalArgumentException("Unsupported proxy voice packet type: " + type);
+    }
+
+    static byte[] encodeChallenge(byte[] secret, byte[] challenge) throws Exception {
+        return encodePayload(secret, ByteBuffer.allocate(33).put((byte) 0x0B).put(challenge).array());
+    }
+
+    static byte[] microphonePayload(DecodedPacket packet) {
+        ByteBuffer buffer = ByteBuffer.allocate(1 + 5 + packet.audio().length + 9);
+        buffer.put((byte) 0x01);
+        putBytes(buffer, packet.audio());
+        buffer.putLong(packet.sequence()).put((byte) (packet.whispering() ? 1 : 0));
+        return Arrays.copyOf(buffer.array(), buffer.position());
     }
 
     static byte[] encodeControl(byte[] secret, byte type) throws Exception {
@@ -106,7 +127,7 @@ final class ProxyVoicePacketCodec {
         return encodePayload(secret, Arrays.copyOf(payload.array(), payload.position()));
     }
 
-    private static byte[] encodePayload(byte[] secret, byte[] plaintext) throws Exception {
+    static byte[] encodePayload(byte[] secret, byte[] plaintext) throws Exception {
         byte[] encrypted = encryptPayload(secret, plaintext);
         ByteBuffer outer = ByteBuffer.allocate(1 + 5 + encrypted.length);
         outer.put(MAGIC);
@@ -183,6 +204,9 @@ final class ProxyVoicePacketCodec {
         return result;
     }
 
-    record DecodedPacket(UUID playerUUID, byte type, byte[] audio, long sequence, boolean whispering, byte[] authenticatedSecret) {
+    record DecodedPacket(UUID playerUUID, byte type, byte[] audio, long sequence, boolean whispering, byte[] authenticatedSecret, byte[] pong) {
+        DecodedPacket(UUID playerUUID, byte type, byte[] audio, long sequence, boolean whispering, byte[] authenticatedSecret) {
+            this(playerUUID, type, audio, sequence, whispering, authenticatedSecret, null);
+        }
     }
 }
