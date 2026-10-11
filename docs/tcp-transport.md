@@ -1,6 +1,6 @@
 # TCP voice transport
 
-This fork targets Minecraft 26.1, 26.2 and 26.3 in separate `tcp/26.x` branches.
+This fork targets client versions 1.21.11, 26.1.2, 26.2 and 26.3 in separate branches.
 It retains the upstream license, codecs, encryption, application packets, game-channel
 initialization, group management and public API names. It is not wire compatible with
 the upstream UDP transport. Compatibility version `1021` distinguishes it during the
@@ -42,13 +42,13 @@ disconnect cleanup. Logout and application timeouts close the player's TCP socke
 reauthentication on a new TCP endpoint replaces the old endpoint. Server shutdown
 closes the listener and all client streams and unblocks a pending receive.
 
-## Central proxy mode (26.3, protocol 1021)
+## Central proxy mode (protocol 1021)
 
-Enable `proxy_mode=true` on each backend using this branch. The proxy owns the public
+Enable `proxy_mode=true` on each backend. Use the Velocity or BungeeCord proxy JAR from
+the 26.3 distribution with client/backend builds for the matching Minecraft version. All
+of them use protocol 1021. The proxy owns the public
 fixed TCP port (default 24454); `port=0` refuses voice-service startup on both proxy and
-backend. Client, backend and proxy must all use this revision. Java 25 is required.
-The 26.1/26.2 branches retain their earlier standalone TCP protocol and are not changed
-by this revision.
+backend. Minecraft 26 builds require Java 25; the 1.21.11 client uses Java 21.
 
 Backends send their player UUID in the secret handshake. The proxy never guesses a
 missing mapping from a proxy UUID. Inconsistent or missing uploaded identity disables
@@ -56,8 +56,9 @@ voice for the affected player, displays a localized internal-server-error messag
 logs the UUID, backend and reason. Outgoing positional audio uses the backend entity
 UUID, so a valid explicit mapping can differ from the proxy UUID.
 
-Routing snapshots are computed on the server thread every 250 ms, with at most one
-queued update. Unchanged routes use a 33-byte heartbeat once per second instead of
+Routing snapshots are refreshed every 250 ms, with at most one queued update. Folia
+collects player state on each player's entity scheduler before calculating routes.
+Unchanged routes use a 33-byte heartbeat once per second instead of
 resending the full recipient lists. Changes send a new snapshot immediately on the next
 update. Identity, generation, increasing update sequence, backend connection source and
 three-second freshness are checked. Server switches clear credentials and routing state;
@@ -71,8 +72,9 @@ five seconds. Terminal unavailable/internal-error states close the old voice con
 clear credentials and cancel retries. Spectator/permission/disabled states stop the mic
 while retaining control keepalives, allowing recovery when eligibility changes.
 `allow_spectator_voice=false` disables both sending and receiving by default. Enabling
-spectator voice uses the backend processing path so possession and location behavior
-are preserved.
+spectator voice on non-Folia backends uses the backend processing path so possession and
+location behavior are preserved. Folia routes from the spectator's own position; player
+possession behavior is not available there.
 
 The proxy reports validated connection state and a per-connection session UUID to the
 backend, refreshing it once per second. Backends only emit connected events after this
@@ -90,6 +92,11 @@ back to the originating backend session.
 This deliberately spends backend bandwidth only where an addon needs the audio; those
 addons cannot inspect raw microphone data without receiving it. Extremely large target
 lists also use this path to stay below Bukkit's plugin-message payload limit.
+
+Folia 26.1.2 must run in proxy mode. Its backend audio processing hooks are not region
+thread safe; if an installed addon requires those hooks, the plugin logs the reason and
+disables voice on that Folia backend instead of processing player audio unsafely.
+Oversized Folia route lists are capped to the plugin-message payload limit.
 
 ## Authentication and encryption
 
@@ -126,5 +133,5 @@ logout/rejoin, and verify recovery after interrupting the voice TCP connection.
 `test-runtime.ps1` / `test-runtime.sh` compile the production proxy endpoint, sniffer and
 codec and use real loopback sockets. `python tests/client/run.py` compiles the production
 client lifecycle/connection classes against game, audio and socket doubles. Neither
-replaces a Minecraft game smoke test. CI also builds all supported platforms and includes
-Velocity and BungeeCord JARs in its artifacts.
+replaces a Minecraft game smoke test. CI builds the supported platforms for each branch;
+the shared Velocity and BungeeCord proxy JARs are included in the 26.3 distribution.
