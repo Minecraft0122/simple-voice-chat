@@ -2,9 +2,9 @@ name: Build TCP voice chat
 
 on:
   push:
-    branches: ['tcp/26.*']
+    branches: ['tcp/**']
   pull_request:
-    branches: ['tcp/26.*']
+    branches: ['tcp/**']
   workflow_dispatch:
 
 permissions:
@@ -18,7 +18,7 @@ jobs:
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: '25'
+          java-version: '21'
       - name: Run real TCP transport regressions
         run: bash scripts/test-tcp.sh
 
@@ -30,7 +30,7 @@ jobs:
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: '25'
+          java-version: '21'
       - uses: gradle/actions/setup-gradle@v6
       - name: Build supported platforms
         shell: bash
