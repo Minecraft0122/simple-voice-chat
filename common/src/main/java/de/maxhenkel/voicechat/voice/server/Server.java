@@ -29,13 +29,17 @@ import java.nio.channels.AsynchronousCloseException;
 import java.security.SecureRandom;
 import java.util.Collection;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class Server extends Thread {
 
@@ -59,6 +63,7 @@ public class Server extends Thread {
     private final ServerCategoryManager categoryManager;
     private final Map<UUID, ProxyRoutingPacket> lastRoutingStates = new ConcurrentHashMap<>();
     private final Map<UUID, Long> lastRoutingSent = new ConcurrentHashMap<>();
+    private final AtomicBoolean foliaAudioWarningLogged = new AtomicBoolean();
     private long lastProxyRoutingUpdate;
     private final long proxyRoutingGeneration = new SecureRandom().nextLong();
     private long proxyRoutingSequence;
@@ -70,6 +75,9 @@ public class Server extends Thread {
                 Voicechat.LOGGER.warn("Running in offline mode - Voice chat encryption is not secure!");
             }
             int configPort = Voicechat.SERVER_CONFIG.voiceChatPort.get();
+            if (CommonCompatibilityManager.INSTANCE.isFolia() && !Voicechat.SERVER_CONFIG.proxyMode.get()) {
+                throw new IllegalArgumentException("Folia requires proxyMode=true so voice routing stays on the proxy and entity work runs on region schedulers.");
+            }
             if (configPort == 0) throw new IllegalArgumentException("Voice chat port=0 is forbidden; configure a fixed TCP port (1..65535).");
             if (configPort < 0) {
                 Voicechat.LOGGER.warn("The TCP voice chat cannot share the Minecraft port; using voice port 24454 for legacy port=-1");
@@ -333,7 +341,9 @@ public class Server extends Thread {
                         lastProxyRoutingUpdate = now;
                         server.execute(() -> {
                             try { if (running) Server.this.sendProxyRoutingStates(); }
-                            finally { routingUpdateQueued.set(false); }
+                            finally {
+                                if (!CommonCompatibilityManager.INSTANCE.isFolia()) routingUpdateQueued.set(false);
+                            }
                         });
                     }
                     pingManager.checkTimeouts();
@@ -479,6 +489,10 @@ public class Server extends Thread {
     }
 
     private void sendProxyRoutingStates() {
+        if (CommonCompatibilityManager.INSTANCE.isFolia()) {
+            sendFoliaProxyRoutingStates();
+            return;
+        }
         long now = System.currentTimeMillis();
         boolean proxy = Voicechat.SERVER_CONFIG.proxyMode.get();
         for (ServerPlayer sender : server.getPlayerList().getPlayers()) {
@@ -518,6 +532,180 @@ public class Server extends Thread {
             lastRoutingSent.put(uuid, now);
             NetManager.sendToClient(sender, packet);
         }
+    }
+
+    private void sendFoliaProxyRoutingStates() {
+        if (!Voicechat.SERVER_CONFIG.proxyMode.get()) {
+            routingUpdateQueued.set(false);
+            return;
+        }
+        List<ServerPlayer> onlinePlayers = List.copyOf(server.getPlayerList().getPlayers());
+        if (onlinePlayers.isEmpty()) {
+            routingUpdateQueued.set(false);
+            return;
+        }
+
+        Map<UUID, ServerPlayer> playerReferences = new ConcurrentHashMap<>();
+        List<CompletableFuture<ProxyPlayerSnapshot>> snapshots = new ArrayList<>(onlinePlayers.size());
+        for (ServerPlayer player : onlinePlayers) {
+            CompletableFuture<ProxyPlayerSnapshot> snapshot = new CompletableFuture<>();
+            snapshots.add(snapshot);
+            AtomicBoolean completed = new AtomicBoolean();
+            Runnable retired = () -> {
+                if (completed.compareAndSet(false, true)) snapshot.complete(null);
+            };
+            try {
+                CommonCompatibilityManager.INSTANCE.executeForPlayer(server, player, () -> {
+                    try {
+                        ProxyPlayerSnapshot data = createProxyPlayerSnapshot(player, onlinePlayers);
+                        if (data != null) playerReferences.put(data.uuid(), player);
+                        if (completed.compareAndSet(false, true)) snapshot.complete(data);
+                    } catch (Exception e) {
+                        Voicechat.LOGGER.warn("Could not read voice routing state for Folia player", e);
+                        if (completed.compareAndSet(false, true)) snapshot.complete(null);
+                    }
+                }, retired);
+            } catch (Exception e) {
+                Voicechat.LOGGER.warn("Could not schedule voice routing snapshot for Folia player", e);
+                retired.run();
+            }
+        }
+
+        CompletableFuture.allOf(snapshots.toArray(CompletableFuture[]::new)).whenComplete((ignored, failure) -> {
+            try {
+                CommonCompatibilityManager.INSTANCE.execute(server, () -> {
+                    try {
+                        List<ProxyPlayerSnapshot> available = snapshots.stream()
+                                .map(CompletableFuture::join)
+                                .filter(java.util.Objects::nonNull)
+                                .toList();
+                        sendFoliaProxyRoutingStates(available, playerReferences, System.currentTimeMillis());
+                    } catch (Exception e) {
+                        Voicechat.LOGGER.error("Failed to update Folia voice proxy routing", e);
+                    } finally {
+                        routingUpdateQueued.set(false);
+                    }
+                });
+            } catch (Exception e) {
+                Voicechat.LOGGER.error("Could not schedule Folia voice routing update", e);
+                routingUpdateQueued.set(false);
+            }
+        });
+    }
+
+    @Nullable
+    private ProxyPlayerSnapshot createProxyPlayerSnapshot(ServerPlayer player, List<ServerPlayer> onlinePlayers) {
+        UUID uuid = player.getUUID();
+        if (!Voicechat.SERVER.isCompatible(uuid)) return null;
+        PlayerState state = playerStateManager.getState(uuid);
+        if (state == null) return null;
+
+        Set<UUID> visiblePlayers = new HashSet<>();
+        for (ServerPlayer other : onlinePlayers) {
+            if (other != player && CommonCompatibilityManager.INSTANCE.canSee(player, other)) {
+                visiblePlayers.add(other.getUUID());
+            }
+        }
+        @Nullable UUID groupId = state.getGroup();
+        @Nullable Group group = groupId == null ? null : groupManager.getGroup(groupId);
+        net.minecraft.world.phys.Vec3 position = player.position();
+        return new ProxyPlayerSnapshot(uuid, player.level().dimension().toString(),
+                position.x, position.y, position.z, player.isSpectator(),
+                PermissionManager.INSTANCE.SPEAK_PERMISSION.hasPermission(player),
+                PermissionManager.INSTANCE.LISTEN_PERMISSION.hasPermission(player),
+                state.isDisabled(), state.isDisconnected(), groupId,
+                group == null || group.isOpen(), group != null && group.isIsolated(), Set.copyOf(visiblePlayers));
+    }
+
+    private void sendFoliaProxyRoutingStates(List<ProxyPlayerSnapshot> players, Map<UUID, ServerPlayer> playerReferences, long now) {
+        boolean backendAudioRequired = PluginManager.instance().requiresBackendAudio();
+        if (backendAudioRequired && foliaAudioWarningLogged.compareAndSet(false, true)) {
+            Voicechat.LOGGER.error("Voice chat is disabled on this Folia backend because an installed voice plugin requires backend audio processing, which is not region-thread safe.");
+        }
+        for (ProxyPlayerSnapshot sender : players) {
+            UUID uuid = sender.uuid();
+            ClientConnection connection = connections.get(uuid);
+            if (connection != null && now - connection.getLastKeepAliveResponse() > 3500L) {
+                proxyDisconnected(uuid);
+                connection = null;
+            }
+            int status = backendAudioRequired ? VoiceAvailability.DISABLED : foliaVoiceAvailability(sender);
+            boolean allowed = status == VoiceAvailability.AVAILABLE;
+            List<UUID> normal = allowed ? getProxyTargets(sender, players, false) : List.of();
+            List<UUID> whisper = allowed ? getProxyTargets(sender, players, true) : List.of();
+            List<UUID> group = allowed ? getProxyGroupTargets(sender, players) : List.of();
+            if (normal.size() + whisper.size() + group.size() > 1800) {
+                int remaining = 1800;
+                int normalEnd = Math.min(normal.size(), remaining);
+                normal = List.copyOf(normal.subList(0, normalEnd));
+                remaining -= normalEnd;
+                int whisperEnd = Math.min(whisper.size(), remaining);
+                whisper = List.copyOf(whisper.subList(0, whisperEnd));
+                remaining -= whisperEnd;
+                group = List.copyOf(group.subList(0, Math.min(group.size(), remaining)));
+            }
+            ProxyRoutingPacket packet = new ProxyRoutingPacket(uuid, proxyRoutingGeneration, ++proxyRoutingSequence,
+                    status, false, Voicechat.SERVER_CONFIG.voiceChatDistance.get().floatValue(),
+                    Voicechat.SERVER_CONFIG.whisperDistance.get().floatValue(), normal, whisper, group);
+            if (packet.sameRoutes(lastRoutingStates.get(uuid))) {
+                if (now - lastRoutingSent.getOrDefault(uuid, 0L) < 1000L) continue;
+                packet.heartbeat();
+            } else {
+                lastRoutingStates.put(uuid, packet);
+            }
+            lastRoutingSent.put(uuid, now);
+            ServerPlayer player = playerReferences.get(uuid);
+            if (player != null) NetManager.sendToClient(player, packet);
+        }
+    }
+
+    private int foliaVoiceAvailability(ProxyPlayerSnapshot player) {
+        if (!Voicechat.SERVER_CONFIG.allowSpectatorVoice.get() && player.spectator()) return VoiceAvailability.SPECTATOR;
+        if (!player.speakPermission()) return VoiceAvailability.NO_PERMISSION;
+        if (player.disabled()) return VoiceAvailability.DISABLED;
+        if (player.disconnected()) return VoiceAvailability.WAITING;
+        return VoiceAvailability.AVAILABLE;
+    }
+
+    private List<UUID> getProxyTargets(ProxyPlayerSnapshot sender, List<ProxyPlayerSnapshot> players, boolean whispering) {
+        float distance = whispering
+                ? Voicechat.SERVER_CONFIG.whisperDistance.get().floatValue()
+                : (float) getBroadcastRange(Utils.getDefaultDistanceServer());
+        double maxDistanceSquared = distance * distance;
+        List<UUID> targets = new ArrayList<>();
+        for (ProxyPlayerSnapshot receiver : players) {
+            if (receiver.uuid().equals(sender.uuid()) || receiver.spectator() && !Voicechat.SERVER_CONFIG.allowSpectatorVoice.get()
+                    || receiver.disabled() || receiver.disconnected() || !receiver.listenPermission()
+                    || !receiver.visiblePlayers().contains(sender.uuid())) continue;
+            boolean sameGroup = sender.groupId() != null && sender.groupId().equals(receiver.groupId());
+            if (sameGroup || !sender.dimension().equals(receiver.dimension())
+                    || receiver.groupIsolated() && !sameGroup
+                    || sender.groupId() != null && !sender.groupOpen() && !sameGroup) continue;
+            double dx = sender.x() - receiver.x();
+            double dy = sender.y() - receiver.y();
+            double dz = sender.z() - receiver.z();
+            if (dx * dx + dy * dy + dz * dz <= maxDistanceSquared) targets.add(receiver.uuid());
+        }
+        return List.copyOf(targets);
+    }
+
+    private List<UUID> getProxyGroupTargets(ProxyPlayerSnapshot sender, List<ProxyPlayerSnapshot> players) {
+        if (sender.groupId() == null) return List.of();
+        List<UUID> targets = new ArrayList<>();
+        for (ProxyPlayerSnapshot receiver : players) {
+            if (receiver.uuid().equals(sender.uuid()) || !sender.groupId().equals(receiver.groupId())
+                    || receiver.spectator() && !Voicechat.SERVER_CONFIG.allowSpectatorVoice.get()
+                    || receiver.disabled() || receiver.disconnected() || !receiver.listenPermission()
+                    || !receiver.visiblePlayers().contains(sender.uuid())) continue;
+            targets.add(receiver.uuid());
+        }
+        return List.copyOf(targets);
+    }
+
+    private record ProxyPlayerSnapshot(UUID uuid, String dimension, double x, double y, double z,
+                                       boolean spectator, boolean speakPermission, boolean listenPermission,
+                                       boolean disabled, boolean disconnected, @Nullable UUID groupId,
+                                       boolean groupOpen, boolean groupIsolated, Set<UUID> visiblePlayers) {
     }
 
     /** Called only on the server thread, over the proxy-owned control channel. */

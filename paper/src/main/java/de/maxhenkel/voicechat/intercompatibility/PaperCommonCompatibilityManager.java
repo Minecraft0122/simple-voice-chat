@@ -264,4 +264,9 @@ public class PaperCommonCompatibilityManager extends CommonCompatibilityManager 
         return "Folia".equalsIgnoreCase(Bukkit.getServer().getName());
     }
 
+    @Override
+    public void executeForPlayer(MinecraftServer server, ServerPlayer player, Runnable task, Runnable retired) {
+        player.getBukkitEntity().getScheduler().run(VoicechatPaperPlugin.INSTANCE, scheduledTask -> task.run(), retired);
+    }
+
 }

@@ -44,6 +44,18 @@ public class PlayerStateManager {
 
     public void broadcastState(@Nullable ServerPlayer stateOwner, PlayerState state) {
         PlayerStatePacket packet = new PlayerStatePacket(state);
+        if (CommonCompatibilityManager.INSTANCE.isFolia()) {
+            CommonCompatibilityManager.INSTANCE.execute(voicechatServer.getServer(), () -> {
+                for (ServerPlayer receiver : voicechatServer.getServer().getPlayerList().getPlayers()) {
+                    CommonCompatibilityManager.INSTANCE.executeForPlayer(voicechatServer.getServer(), receiver, () -> {
+                        if (stateOwner != null && !CommonCompatibilityManager.INSTANCE.canSee(receiver, stateOwner)) return;
+                        NetManager.sendToClient(receiver, packet);
+                    }, () -> {});
+                }
+            });
+            PluginManager.instance().onPlayerStateChanged(state);
+            return;
+        }
         for (ServerPlayer receiver : voicechatServer.getServer().getPlayerList().getPlayers()) {
             if (stateOwner != null && !CommonCompatibilityManager.INSTANCE.canSee(receiver, stateOwner)) {
                 continue;
@@ -55,6 +67,16 @@ public class PlayerStateManager {
 
     public void broadcastRemoveState(ServerPlayer stateOwner) {
         RemovePlayerStatePacket packet = new RemovePlayerStatePacket(stateOwner.getUUID());
+        if (CommonCompatibilityManager.INSTANCE.isFolia()) {
+            CommonCompatibilityManager.INSTANCE.execute(voicechatServer.getServer(), () -> {
+                for (ServerPlayer receiver : voicechatServer.getServer().getPlayerList().getPlayers()) {
+                    CommonCompatibilityManager.INSTANCE.executeForPlayer(voicechatServer.getServer(), receiver,
+                            () -> NetManager.sendToClient(receiver, packet), () -> {});
+                }
+            });
+            PluginManager.instance().onPlayerStateChanged(defaultDisconnectedState(stateOwner));
+            return;
+        }
         for (ServerPlayer receiver : voicechatServer.getServer().getPlayerList().getPlayers()) {
             NetManager.sendToClient(receiver, packet);
         }
@@ -63,6 +85,15 @@ public class PlayerStateManager {
     }
 
     public void onPlayerCompatibilityCheckSucceeded(ServerPlayer player) {
+        if (CommonCompatibilityManager.INSTANCE.isFolia()) {
+            CommonCompatibilityManager.INSTANCE.executeForPlayer(voicechatServer.getServer(), player,
+                    () -> onPlayerCompatibilityCheckSucceededOwned(player), () -> {});
+            return;
+        }
+        onPlayerCompatibilityCheckSucceededOwned(player);
+    }
+
+    private void onPlayerCompatibilityCheckSucceededOwned(ServerPlayer player) {
         List<PlayerState> stateList = new ArrayList<>(states.size());
         for (PlayerState state : states.values()) {
             ServerPlayer otherPlayer = voicechatServer.getServer().getPlayerList().getPlayer(state.getUuid());

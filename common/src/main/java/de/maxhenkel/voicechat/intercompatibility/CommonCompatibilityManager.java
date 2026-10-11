@@ -100,4 +100,8 @@ public abstract class CommonCompatibilityManager {
         return false;
     }
 
+    public void executeForPlayer(MinecraftServer server, ServerPlayer player, Runnable task, Runnable retired) {
+        server.execute(task);
+    }
+
 }
