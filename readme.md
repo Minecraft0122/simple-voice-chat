@@ -7,28 +7,25 @@
 
 | 分支 | Minecraft | 目标平台 |
 | --- | --- | --- |
+| `tcp/1.21.11` | 1.21.11 客户端 | Fabric、NeoForge、Forge、Paper |
 | `tcp/26.1` | 26.1 / 26.1.1 / 26.1.2 | Fabric、NeoForge、Forge、Paper |
 | `tcp/26.2` | 26.2 | Fabric、NeoForge、Forge、Paper |
-| `tcp/26.3` | 26.3 | Fabric、NeoForge、Bukkit、Paper |
+| `tcp/26.3` | 26.3 | Fabric、NeoForge、Bukkit、Paper、Velocity、BungeeCord |
 
-仅维护 26+。各游戏版本分别构建；不要跨 Minecraft 版本使用同一个模组 JAR。
-请从本仓库对应分支的 Actions 构建产物获取文件，原版下载链接提供的是 UDP 版本。
+客户端现提供 1.21.11、26.1.2、26.2、26.3 独立构建；各游戏版本分别构建，不要跨 Minecraft 版本使用同一个模组 JAR。Velocity/BungeeCord 集中代理插件使用 `tcp/26.3` 的协议 1021 构建。
+请从本仓库发布页下载对应版本文件，原版下载链接提供的是 UDP 版本。
 
 1. 服务端安装本分支对应平台的模组；Paper 服务器将 Paper JAR 放入 `plugins/`。
 2. **所有玩家也必须安装本分支对应游戏版本的客户端模组**。仅替换服务器插件无法让原版客户端改用 TCP。
-3. 在 `config/voicechat/voicechat-server.properties`（Paper 为 `plugins/voicechat/voicechat-server.properties`）中设置 `port=24454`，并放行/转发 **24454/TCP**。
-4. 语音 TCP 端口必须与 Minecraft 游戏端口不同。旧配置 `port=-1` 会改用 `24454`；`port=0` 会选择空闲端口。
+3. 直连时，在配置中设置 `port=24454`，并放行/转发 **24454/TCP**。集中代理时，Velocity/BungeeCord 插件监听此 TCP 端口；各后端设置 `proxy_mode=true`。
+4. 语音 TCP 端口必须与 Minecraft 游戏端口不同。旧配置 `port=-1` 会改用 `24454`；`port=0` 会拒绝启动语音服务。
 5. 若使用端口映射或独立语音域名，将 `voice_host` 设为玩家可连接的 `域名:外部TCP端口`。
 
-局域网开放世界时保留自动分配的独立语音端口，游戏聊天栏会显示该端口。
-Minecraft 代理可以继续转发游戏连接，但语音必须直连后端或通过普通 TCP 端口转发。
-**不支持上游 UDP 语音代理（Velocity / BungeeCord）、UDP 检测工具或替换为 UDP 的第三方 socket 实现。**
-26.3 的 Bukkit/Paper 插件也使用 TCP；Velocity/BungeeCord 等上游 UDP 代理模块不在本分支支持范围。
-本分支的协议兼容编号为 `1020`，原版 UDP 客户端会收到版本不兼容提示。
+Folia 26.1.2 后端必须设置 `proxy_mode=true`，由实体区域调度器采集玩家位置和权限后将路由状态交给代理；Folia 不走子服音频处理回传。默认旁观模式不能使用语音。Velocity/BungeeCord 和所有客户端、后端都必须使用协议 1021 TCP 分支。
 
 ## 构建与验证
 
-需要 JDK 25。Windows 使用 `gradlew.bat`，Linux/macOS 使用 `./gradlew`。
+Minecraft 26.x 构建需要 JDK 25；1.21.11 客户端构建需要 JDK 21。Windows 使用 `gradlew.bat`，Linux/macOS 使用 `./gradlew`。
 
 ```powershell
 .\gradlew.bat :fabric:build :paper:build :neoforge:build
