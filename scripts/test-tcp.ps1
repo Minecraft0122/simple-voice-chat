@@ -37,7 +37,7 @@ foreach ($SourceFile in $SourceFiles) {
     }
 }
 
-& $JavaCompiler --release 25 -encoding UTF-8 -d $OutputDirectory @SourceFiles
+& $JavaCompiler --release 21 -encoding UTF-8 -d $OutputDirectory @SourceFiles
 if ($LASTEXITCODE -ne 0) {
     throw "TCP transport test compilation failed (exit $LASTEXITCODE)."
 }

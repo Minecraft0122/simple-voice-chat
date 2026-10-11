@@ -20,7 +20,7 @@ def vc(name, body): stub(base + "." + name, body)
 stub("javax.annotation.Nullable", "public @interface Nullable {}")
 stub("net.minecraft.ChatFormatting", "public enum ChatFormatting { DARK_RED }")
 stub("net.minecraft.network.chat.Component", "public class Component { public static Component translatable(String key) { return new Component(); } public Component withStyle(Object o) { return this; } }")
-stub("net.minecraft.client.player.LocalPlayer", "public class LocalPlayer { public void sendOverlayMessage(net.minecraft.network.chat.Component c) {} }")
+stub("net.minecraft.client.player.LocalPlayer", "public class LocalPlayer { public void displayClientMessage(net.minecraft.network.chat.Component c, boolean actionbar) {} }")
 stub("net.minecraft.client.Minecraft", "public class Minecraft { private static final Minecraft INSTANCE = new Minecraft(); public net.minecraft.client.player.LocalPlayer player; public static Minecraft getInstance() { return INSTANCE; } public synchronized void execute(Runnable r) { r.run(); } }")
 vc("Voicechat", "public class Voicechat { public static final Logger LOGGER = new Logger(); public static class Logger { public void info(String s,Object... a) {} public void warn(String s,Object... a) {} public void error(String s,Object... a) {} public void debug(String s,Object... a) {} } }")
 vc("VoicechatClient", "public class VoicechatClient { public static final Config CLIENT_CONFIG = new Config(); public static class Config { public Flag useNatives = new Flag(); } public static class Flag { public boolean get() { return false; } } }")
@@ -60,5 +60,5 @@ sources += [str(root / "common/src/main/java/de/maxhenkel/voicechat/voice/common
 sources += [str(root / "common/src/main/java/de/maxhenkel/voicechat/voice/transport" / name) for name in ("VoiceAvailability.java", "VoiceHandshake.java")]
 sources += [str(root / "api/src/main/java/de/maxhenkel/voicechat/api" / name) for name in ("ClientVoicechatSocket.java", "RawUdpPacket.java")]
 sources += [str(root / "tests/client" / name) for name in ("TestSocket.java", "ClientLifecycleTest.java")]
-subprocess.run([shutil.which("javac"), "--release", "25", "-encoding", "UTF-8", "-d", str(out), *sources], check=True)
+subprocess.run([shutil.which("javac"), "--release", "21", "-encoding", "UTF-8", "-d", str(out), *sources], check=True)
 subprocess.run([shutil.which("java"), "-ea", "-cp", str(out), "de.maxhenkel.voicechat.voice.client.ClientLifecycleTest"], check=True)
