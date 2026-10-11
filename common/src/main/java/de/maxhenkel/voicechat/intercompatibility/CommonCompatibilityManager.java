@@ -96,4 +96,8 @@ public abstract class CommonCompatibilityManager {
         server.execute(runnable);
     }
 
+    public boolean isFolia() {
+        return false;
+    }
+
 }

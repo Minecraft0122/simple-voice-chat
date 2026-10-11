@@ -24,12 +24,28 @@ public class ClientVoicechatConnection extends Thread {
     private volatile boolean connected;
     private boolean disconnectEventEmitted;
     private final AuthThread authThread;
-    private long lastKeepAlive;
+    private volatile long lastKeepAlive;
+    private volatile de.maxhenkel.voicechat.voice.transport.VoiceHandshake handshake;
+    private final java.util.concurrent.atomic.AtomicLong audioSequence = new java.util.concurrent.atomic.AtomicLong();
+
+    public long nextAudioSequence() { return audioSequence.getAndIncrement(); }
+    public boolean canSendAudio() { return isInitialized() && client.canSendAudio(); }
+    public Secret getReadSecret() {
+        return handshake == null ? data.getSecret() : Secret.fromBytes(handshake.serverKey());
+    }
+    public Secret getWriteSecret(Packet<?> packet) {
+        if (packet instanceof AuthenticatePacket || packet instanceof AuthenticationResponsePacket || handshake == null) return data.getSecret();
+        return Secret.fromBytes(handshake.clientKey());
+    }
 
     public ClientVoicechatConnection(ClientVoicechat client, InitializationData data) throws Exception {
         this.client = client;
         this.data = data;
-        this.address = InetAddress.getByName(data.getServerIP());
+        if (data.getServerIP().equals("rtc-local") || data.getServerIP().equals("rtc-remote")) {
+            this.address = InetAddress.getLoopbackAddress();
+        } else {
+            this.address = InetAddress.getByName(data.getServerIP());
+        }
         this.socket = ClientPluginManager.instance().getClientSocketImplementation();
         this.lastKeepAlive = -1;
         this.running = true;
@@ -67,6 +83,14 @@ public class ClientVoicechatConnection extends Thread {
                 NetworkMessage in = ClientNetworkMessage.readPacketClient(socket.read(), this);
                 if (in == null) {
                     continue;
+                } else if (in.getPacket() instanceof AuthenticationChallengePacket challenge) {
+                    if (authenticated) continue;
+                    handshake = new de.maxhenkel.voicechat.voice.transport.VoiceHandshake(data.getSecret().getSecret(), data.getPlayerUUID(), challenge.getData());
+                    sendToServer(new NetworkMessage(new AuthenticationResponsePacket(handshake.proof())));
+                } else if (in.getPacket() instanceof AvailabilityPacket availability) {
+                    Minecraft.getInstance().execute(() -> {
+                        if (client.getConnection() == this) client.setAvailability(availability.getStatus());
+                    });
                 } else if (in.getPacket() instanceof AuthenticateAckPacket) {
                     if (!authenticated) {
                         Voicechat.LOGGER.info("Server acknowledged authentication");
@@ -127,6 +151,7 @@ public class ClientVoicechatConnection extends Thread {
     }
 
     public boolean sendToServer(NetworkMessage message) {
+        if (message.getPacket() instanceof MicPacket && !canSendAudio()) return false;
         if (!running || socket.isClosed()) {
             return false; // Ignore sending packets when connection is closed
         }
@@ -191,7 +216,7 @@ public class ClientVoicechatConnection extends Thread {
                         Voicechat.LOGGER.warn("Trying to authenticate voice chat connection (this message will not be logged again)");
                         authLogMessageCount++;
                     }
-                    if (!sendToServer(new NetworkMessage(new AuthenticatePacket(data.getPlayerUUID(), data.getSecret())))) {
+                    if (!sendToServer(new NetworkMessage(handshake == null ? new AuthenticatePacket(data.getPlayerUUID(), data.getSecret()) : new AuthenticationResponsePacket(handshake.proof())))) {
                         break;
                     }
                 } else {

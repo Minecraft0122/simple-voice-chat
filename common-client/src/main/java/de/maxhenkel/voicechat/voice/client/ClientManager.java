@@ -68,6 +68,12 @@ public class ClientManager {
         });
 
         ClientServerNetManager.setClientListener(CommonCompatibilityManager.INSTANCE.getNetManager().secretChannel, (player, packet) -> authenticate(packet));
+        ClientServerNetManager.setClientListener(CommonCompatibilityManager.INSTANCE.getNetManager().voiceAvailabilityChannel, (player, packet) -> {
+            if (client != null) {
+                if (packet.getStatus() == de.maxhenkel.voicechat.voice.transport.VoiceAvailability.WAITING) client.resetBackend();
+                client.setAvailability(packet.getStatus());
+            }
+        });
     }
 
     private void authenticate(SecretPacket secretPacket) {
@@ -114,8 +120,17 @@ public class ClientManager {
         }
         hasShownPermissionsMessage = false;
         Voicechat.LOGGER.info("Sending secret request to the server");
-        ClientServerNetManager.sendToServer(new RequestSecretPacket(Voicechat.COMPATIBILITY_VERSION));
         client = new ClientVoicechat();
+        ClientVoicechat joined = client;
+        ClientServerNetManager.sendToServer(new RequestSecretPacket(Voicechat.COMPATIBILITY_VERSION));
+        Thread.ofVirtual().name("voicechat-backend-check").start(() -> {
+            try { Thread.sleep(5000L); } catch (InterruptedException e) { return; }
+            minecraft.execute(() -> {
+                if (client == joined && joined.getInitializationData() == null && joined.getAvailability() == de.maxhenkel.voicechat.voice.transport.VoiceAvailability.WAITING) {
+                    joined.setAvailability(de.maxhenkel.voicechat.voice.transport.VoiceAvailability.UNAVAILABLE);
+                }
+            });
+        });
     }
 
     public void checkMicrophonePermissions() {

@@ -41,6 +41,9 @@ public class ServerVoiceEvents {
         CommonCompatibilityManager.INSTANCE.onServerVoiceChatDisconnected(this::serverVoiceChatDisconnected);
         CommonCompatibilityManager.INSTANCE.onPlayerCompatibilityCheckSucceeded(this::playerCompatibilityCheckSucceeded);
 
+        CommonCompatibilityManager.INSTANCE.getNetManager().proxyControlChannel.setServerListener((player, packet) -> {
+            if (server != null) server.handleProxyControl(player, packet.getData());
+        });
         CommonCompatibilityManager.INSTANCE.getNetManager().requestSecretChannel.setServerListener((player, packet) -> {
             Voicechat.LOGGER.info("Received secret request of {} ({})", player.getName().getString(), packet.getCompatibilityVersion());
             clientCompatibilities.put(player.getUUID(), packet.getCompatibilityVersion());
@@ -104,6 +107,10 @@ public class ServerVoiceEvents {
             return;
         }
 
+        // TODO Add back when they re-add P2P
+        // Only does something if hosting P2P
+        // WebRtcUtils.addUncheckedRtcConnection(server, player);
+
         boolean dedicated = CommonCompatibilityManager.INSTANCE.isDedicatedServer();
         String configuredVoiceHost = dedicated ? Voicechat.SERVER_CONFIG.voiceHost.get() : "";
         String voiceHost = PluginManager.instance().getVoiceHost(player, configuredVoiceHost);
@@ -111,7 +118,9 @@ public class ServerVoiceEvents {
             Voicechat.LOGGER.warn("A plugin modified voice_host on a non-dedicated server - Ignore this message if this is intended");
         }
 
-        NetManager.sendToClient(player, new SecretPacket(player, secret, server.getPort(), Voicechat.SERVER_CONFIG, voiceHost));
+        int advertisedPort = Voicechat.SERVER_CONFIG.proxyMode.get() ? -1 : server.getPort();
+        NetManager.sendToClient(player, new SecretPacket(player, secret, advertisedPort, Voicechat.SERVER_CONFIG, voiceHost));
+
         Voicechat.LOGGER.info("Sent secret to {}", player.getName().getString());
     }
 

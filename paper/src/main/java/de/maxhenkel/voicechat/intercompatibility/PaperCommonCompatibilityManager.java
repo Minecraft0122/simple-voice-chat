@@ -259,4 +259,9 @@ public class PaperCommonCompatibilityManager extends CommonCompatibilityManager 
         Bukkit.getServer().getGlobalRegionScheduler().execute(VoicechatPaperPlugin.INSTANCE, runnable);
     }
 
+    @Override
+    public boolean isFolia() {
+        return "Folia".equalsIgnoreCase(Bukkit.getServer().getName());
+    }
+
 }
