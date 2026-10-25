@@ -40,6 +40,7 @@ public abstract class VoiceProxy {
         return address == null ? null : address.toString();
     }
     public void availability(UUID player, int status) {
+        if (voiceProxySniffer.getProtocol(player) != de.maxhenkel.voicechat.voice.transport.VoiceProtocol.TCP) return;
         sendToPlayer(player, AVAILABILITY_CHANNEL, new byte[]{(byte) status});
     }
     public void routingChanged(UUID player) {
@@ -91,7 +92,7 @@ public abstract class VoiceProxy {
         if (port == -1) {
             port = 24454;
         }
-        if (port != 0 && port == getDefaultBindSocket().getPort()) {
+        if (de.maxhenkel.voicechat.voice.transport.TransportMode.parse(getConfig().transportMode.get()).tcp() && port != 0 && port == getDefaultBindSocket().getPort()) {
             throw new IllegalArgumentException("TCP voice proxy needs a port different from the Minecraft proxy port");
         }
         return port;

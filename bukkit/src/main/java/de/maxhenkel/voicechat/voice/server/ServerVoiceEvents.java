@@ -1,6 +1,8 @@
 package de.maxhenkel.voicechat.voice.server;
 
 import de.maxhenkel.voicechat.BuildConstants;
+import de.maxhenkel.voicechat.voice.transport.VoiceProtocol;
+import de.maxhenkel.voicechat.voice.transport.TransportMode;
 import de.maxhenkel.voicechat.Voicechat;
 import de.maxhenkel.voicechat.compatibility.PlayerHideEvent;
 import de.maxhenkel.voicechat.compatibility.PlayerShowEvent;
@@ -62,8 +64,9 @@ public class ServerVoiceEvents implements Listener {
             return;
         }
 
-        clientCompatibilities.put(playerUUID, packet.getCompatibilityVersion());
-        if (packet.getCompatibilityVersion() != Voicechat.COMPATIBILITY_VERSION) {
+        Integer previous = clientCompatibilities.putIfAbsent(playerUUID, packet.getCompatibilityVersion());
+        if (previous != null && previous != packet.getCompatibilityVersion()) return;
+        if (!supportsVersion(packet.getCompatibilityVersion())) {
             Voicechat.LOGGER.warn("Connected client {} has incompatible voice chat version (server={}, client={})", player.getName(), Voicechat.COMPATIBILITY_VERSION, packet.getCompatibilityVersion());
             sendIncompatibleMessage(player, packet.getCompatibilityVersion());
         } else {
@@ -75,8 +78,16 @@ public class ServerVoiceEvents implements Listener {
         return isCompatible(player.getUniqueId());
     }
 
+    private boolean supportsVersion(int version) {
+        return TransportMode.parse(Voicechat.SERVER_CONFIG.transportMode.get()).supports(VoiceProtocol.fromVersion(version));
+    }
+
+    public VoiceProtocol getProtocol(UUID playerUuid) {
+        return VoiceProtocol.fromVersion(clientCompatibilities.getOrDefault(playerUuid, -1));
+    }
+
     public boolean isCompatible(UUID playerUuid) {
-        return clientCompatibilities.getOrDefault(playerUuid, -1) == Voicechat.COMPATIBILITY_VERSION;
+        return supportsVersion(clientCompatibilities.getOrDefault(playerUuid, -1));
     }
 
     public static void sendIncompatibleMessage(Player player, int clientCompatibilityVersion) {
@@ -104,7 +115,7 @@ public class ServerVoiceEvents implements Listener {
         }
 
         String voiceHost = PluginManager.instance().getVoiceHost(player, Voicechat.SERVER_CONFIG.voiceHost.get());
-        int advertisedPort = Voicechat.SERVER_CONFIG.proxyMode.get() ? -1 : server.getPort();
+        int advertisedPort = Voicechat.SERVER_CONFIG.isProxyMode() ? -1 : server.getPort();
         NetManager.sendToClient(player, new SecretPacket(player, secret, advertisedPort, Voicechat.SERVER_CONFIG, voiceHost));
 
         Voicechat.LOGGER.info("Sent secret to {}", player.getName());

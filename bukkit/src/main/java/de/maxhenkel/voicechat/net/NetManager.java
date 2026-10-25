@@ -84,7 +84,7 @@ public class NetManager implements Listener {
         String id = c.newInstance().getID().toString();
         packets.add(id);
         Bukkit.getMessenger().registerIncomingPluginChannel(Voicechat.INSTANCE, id, (s, player, bytes) -> {
-            if (!(packetClass == ProxyControlPacket.class && Voicechat.SERVER_CONFIG.proxyMode.get()) && !Voicechat.SERVER.getRateLimiter().allow(player.getUniqueId())) {
+            if (!(packetClass == ProxyControlPacket.class && Voicechat.SERVER_CONFIG.isProxyMode()) && !Voicechat.SERVER.getRateLimiter().allow(player.getUniqueId())) {
                 Voicechat.LOGGER.warn("Player {} exceeded packet rate limit", player.getDisplayName());
                 player.kickPlayer(Voicechat.TRANSLATIONS.rateLimitKickMessage.get());
                 return;

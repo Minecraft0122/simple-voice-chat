@@ -135,20 +135,23 @@ public class ProxyRuntimeTest {
         } while (System.nanoTime() < deadline);
         throw new AssertionError("No backend control message");
     }
-    private static void register(VoiceProxy proxy, UUID player, UUID entity, byte[] secret) throws Exception {
-        proxy.getSniffer().onPluginMessage(VoiceProxy.REQUEST_SECRET_CHANNEL, false, ByteBuffer.allocate(4).putInt(1021).flip(), player);
+    static void register(VoiceProxy proxy, UUID player, UUID entity, byte[] secret) throws Exception {
+        register(proxy, player, entity, secret, 1021);
+    }
+    static void register(VoiceProxy proxy, UUID player, UUID entity, byte[] secret, int version) throws Exception {
+        proxy.getSniffer().onPluginMessage(VoiceProxy.REQUEST_SECRET_CHANNEL, false, ByteBuffer.allocate(4).putInt(version).flip(), player);
         ByteBuffer data = ByteBuffer.allocate(64).put(secret).putInt(-1).putLong(entity.getMostSignificantBits()).putLong(entity.getLeastSignificantBits())
                 .put((byte) 0).putInt(1024).putDouble(48).putInt(1000).put((byte) 1).put((byte) 0).put((byte) 0);
         proxy.getSniffer().onPluginMessage(VoiceProxy.SECRET_CHANNEL, true, data.flip(), player);
     }
-    private static void route(VoiceProxy proxy, UUID player, UUID entity, long sequence, int status, boolean relay, List<UUID> targets) throws Exception {
+    static void route(VoiceProxy proxy, UUID player, UUID entity, long sequence, int status, boolean relay, List<UUID> targets) throws Exception {
         ByteBuffer data = ByteBuffer.allocate(128 + targets.size() * 16).putLong(entity.getMostSignificantBits()).putLong(entity.getLeastSignificantBits())
                 .putLong(7).putLong(sequence).put((byte) 1).put((byte) status).put((byte) (relay ? 1 : 0)).putFloat(48).putFloat(16).put((byte) targets.size());
         for (UUID target : targets) data.putLong(target.getMostSignificantBits()).putLong(target.getLeastSignificantBits());
         data.put((byte) 0).put((byte) 0);
         proxy.getSniffer().onPluginMessage(VoiceProxy.PROXY_ROUTING_CHANNEL, true, data.flip(), player);
     }
-    private static class Client implements AutoCloseable {
+    static class Client implements AutoCloseable {
         final Socket socket;
         final DataInputStream input;
         final DataOutputStream output;

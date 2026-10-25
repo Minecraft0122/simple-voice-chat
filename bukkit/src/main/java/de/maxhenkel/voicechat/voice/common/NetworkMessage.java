@@ -30,6 +30,9 @@ public class NetworkMessage {
     private final long timestamp;
     private Packet<? extends Packet> packet;
     private SocketAddress address;
+    private UUID sender;
+
+    public UUID getSenderUUID() { return sender; }
 
     public NetworkMessage(long timestamp, Packet<?> packet) {
         this(timestamp);
@@ -99,6 +102,7 @@ public class NetworkMessage {
                 Voicechat.LOGGER.debug("Player {} does not have a secret", playerID);
                 return null;
             }
+            if (!server.acceptsTransport(playerID, packet.getSocketAddress())) return null;
             byte[] encrypted = b.readByteArray(Utils.MAX_VOICE_CHAT_PACKET_SIZE);
             ClientConnection session = server.findVoiceSession(playerID, packet.getSocketAddress());
             NetworkMessage decoded = readFromBytes(packet.getSocketAddress(), session == null ? server.getSecret(playerID) : session.getReadSecret(server), encrypted, packet.getTimestamp());
@@ -107,6 +111,14 @@ public class NetworkMessage {
                 if (decoded != null && !(decoded.getPacket() instanceof AuthenticatePacket) && !(decoded.getPacket() instanceof AuthenticationResponsePacket)) return null;
             }
             if (session == null && decoded != null && !(decoded.getPacket() instanceof AuthenticatePacket) && !(decoded.getPacket() instanceof AuthenticationResponsePacket)) return null;
+            if (decoded != null) {
+                decoded.sender = playerID;
+                if (decoded.getPacket() instanceof AuthenticatePacket auth && !playerID.equals(auth.getPlayerUUID())) return null;
+                if (de.maxhenkel.voicechat.voice.transport.VoiceProtocol.LEGACY_UDP.matches(packet.getSocketAddress())
+                        && (decoded.getPacket() instanceof AuthenticationResponsePacket
+                        || decoded.getPacket() instanceof AuthenticationChallengePacket
+                        || decoded.getPacket() instanceof AvailabilityPacket)) return null;
+            }
             return decoded;
         } catch (DecoderException | IndexOutOfBoundsException e) {
             Voicechat.LOGGER.debug("Received invalid packet from {}", packet.getSocketAddress());

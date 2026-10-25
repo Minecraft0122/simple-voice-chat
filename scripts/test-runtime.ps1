@@ -8,17 +8,19 @@ $JavaCompiler = if ($JavaHome) { Join-Path $JavaHome 'bin/javac.exe' } else { (G
 $JavaRuntime = if ($JavaHome) { Join-Path $JavaHome 'bin/java.exe' } else { (Get-Command java).Source }
 New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
 $Sources = @(
-    "$ProxySource/network/ProxyTcpConnection.java", "$ProxySource/network/VoiceProxyServer.java",
+    "$ProxySource/network/ProxyVoiceSession.java", "$ProxySource/network/VoiceProxyServer.java",
     "$ProxySource/network/ProxyVoicePacketCodec.java", "$ProxySource/sniffer/VoiceProxySniffer.java",
     "$ProxySource/sniffer/SniffedSecretPacket.java", "$ProxySource/sniffer/IncompatibleVoiceChatException.java",
     "$ProxySource/util/ByteBufferWrapper.java", "$ProxySource/util/VarIntUtils.java",
     "$ProxySource/logging/VoiceChatLogger.java", "$ProxySource/logging/LogLevel.java",
-    "$TransportSource/TcpConnection.java", "$TransportSource/TcpFrameCodec.java",
-    "$TransportSource/VoiceHandshake.java", "$TransportSource/VoiceAvailability.java", "$TransportSource/ProxyMessages.java",
+    (Get-ChildItem (Join-Path $TransportSource '*.java')).FullName,
     "$RepositoryRoot/tests/proxy/stubs/de/maxhenkel/voicechat/VoiceProxy.java",
-    "$RepositoryRoot/tests/proxy/ProxyRuntimeTest.java"
+    "$RepositoryRoot/tests/proxy/ProxyRuntimeTest.java", "$RepositoryRoot/tests/proxy/MixedProxyTest.java"
 )
 & $JavaCompiler --release 25 -encoding UTF-8 -d $OutputDirectory @Sources
 if ($LASTEXITCODE -ne 0) { throw 'Runtime test compilation failed' }
 & $JavaRuntime -ea -cp $OutputDirectory de.maxhenkel.voicechat.network.ProxyRuntimeTest
 if ($LASTEXITCODE -ne 0) { throw 'Runtime regression tests failed' }
+
+& $JavaRuntime -ea -cp $OutputDirectory de.maxhenkel.voicechat.network.MixedProxyTest
+if ($LASTEXITCODE -ne 0) { throw "Mixed proxy regression tests failed" }

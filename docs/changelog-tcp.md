@@ -1,3 +1,15 @@
+# 2.6.24-tcp.3+26.3 — dual transport and automatic proxy mode
+
+- Add transport_mode=tcp|udp|dual, defaulting to tcp for existing installations.
+- Automatically enable backend proxy mode from supported game forwarding settings before opening listeners.
+- Add proxy_auto_detect (default true), retain a manual override, and exclude OS/TUN proxies from detection.
+- Group generated configuration by purpose, add bilingual deployment comments, and preserve existing values.
+- Accept upstream protocol 20 through UDP alongside TCP protocol 1021, including central proxies.
+- Share routing and addon audio across mixed client types; retain protocol-specific authentication and keys.
+- Isolate endpoint identities, preserve upstream microphone sequence resets, and gate TCP-only control messages.
+- Add atomic dual binds, bounded per-transport queues, malformed-datagram isolation and mixed-client regressions.
+- Document setup, original-client limitations, custom socket requirements and remaining game smoke tests.
+
 # TCP fork changelog
 
 ## 2.6.24-tcp.2+26.3 — protocol 1021

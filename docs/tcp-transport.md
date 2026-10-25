@@ -2,9 +2,10 @@
 
 This fork targets client versions 1.21.11, 26.1.2, 26.2 and 26.3 in separate branches.
 It retains the upstream license, codecs, encryption, application packets, game-channel
-initialization, group management and public API names. It is not wire compatible with
-the upstream UDP transport. Compatibility version `1021` distinguishes it during the
-Minecraft-channel handshake; install this fork on both ends.
+initialization, group management and public API names. The TCP client retains compatibility version 1021. The server now optionally accepts
+upstream UDP protocol 20 using transport_mode=dual (or udp); the default remains tcp.
+Both client types share routing, while authentication and key profiles remain separate.
+See [dual-transport.md](dual-transport.md) for configuration and compatibility limits.
 
 ## Wire format
 
@@ -42,11 +43,17 @@ disconnect cleanup. Logout and application timeouts close the player's TCP socke
 reauthentication on a new TCP endpoint replaces the old endpoint. Server shutdown
 closes the listener and all client streams and unblocks a pending receive.
 
-## Central proxy mode (protocol 1021)
+## Central proxy mode (TCP 1021; optional UDP 20)
 
-Enable `proxy_mode=true` on each backend. Use the Velocity or BungeeCord proxy JAR from
+Backends automatically enable proxy mode when supported game forwarding is enabled
+(Paper Velocity, Spigot/BungeeCord, legacy Paper Velocity, or FabricProxy-Lite).
+For other integrations, set `proxy_mode=true` manually. To keep direct voice behind
+a game proxy, set both `proxy_auto_detect=false` and `proxy_mode=false`.
+Detection does not overwrite the saved manual setting or use OS/TUN proxies or client messages.
+Use the Velocity or BungeeCord proxy JAR from
 the 26.3 distribution with client/backend builds for the matching Minecraft version. All
-of them use protocol 1021. The proxy owns the public
+TCP clients use protocol 1021. Updated proxy and backend builds can both enable
+transport_mode=dual to also accept upstream UDP clients with protocol 20. The proxy owns the public
 fixed TCP port (default 24454); `port=0` refuses voice-service startup on both proxy and
 backend. Minecraft 26 builds require Java 25; the 1.21.11 client uses Java 21.
 
@@ -65,7 +72,7 @@ three-second freshness are checked. Server switches clear credentials and routin
 stale messages from a previous backend are discarded. Target calculation remains local
 to each backend: this is not a cross-server group directory.
 
-The client starts with transmission disabled. It only sends microphone packets after
+The TCP client starts with transmission disabled. It only sends microphone packets after
 challenge authentication, connection validation and an available status. Joining a
 backend without a responding plugin produces a localized unavailable message after
 five seconds. Terminal unavailable/internal-error states close the old voice connection,
@@ -98,7 +105,7 @@ thread safe; if an installed addon requires those hooks, the plugin logs the rea
 disables voice on that Folia backend instead of processing player audio unsafely.
 Oversized Folia route lists are capped to the plugin-message payload limit.
 
-## Authentication and encryption
+## TCP authentication and encryption
 
 Audio remains Opus encoded and AES-128-GCM encrypted (12-byte random IV, 128-bit tag).
 Protocol 1021 adds an encrypted server challenge (packet 0x0B) with 32 random bytes per

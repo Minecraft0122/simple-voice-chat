@@ -11,6 +11,8 @@ import de.maxhenkel.voicechat.net.ProxyRoutingPacket;
 import de.maxhenkel.voicechat.net.ProxyAudioPacket;
 import de.maxhenkel.voicechat.voice.transport.ProxyMessages;
 import de.maxhenkel.voicechat.voice.transport.VoiceAvailability;
+import de.maxhenkel.voicechat.voice.transport.VoiceProtocol;
+import de.maxhenkel.voicechat.voice.transport.TransportMode;
 import de.maxhenkel.voicechat.permission.PermissionManager;
 import de.maxhenkel.voicechat.plugins.PluginManager;
 import de.maxhenkel.voicechat.voice.common.*;
@@ -65,6 +67,7 @@ public class Server extends Thread {
     private long proxyRoutingSequence;
 
     public Server() {
+        Voicechat.SERVER_CONFIG.detectProxy(id -> false);
         int configPort = Voicechat.SERVER_CONFIG.voiceChatPort.get();
         if (configPort == 0) throw new IllegalArgumentException("Voice chat port=0 is forbidden; configure a fixed TCP port (1..65535).");
         if (configPort < 0) {
@@ -73,7 +76,7 @@ public class Server extends Thread {
         } else {
             port = configPort;
         }
-        if (!Voicechat.SERVER_CONFIG.proxyMode.get() && port != 0 && port == Bukkit.getPort()) {
+        if (!Voicechat.SERVER_CONFIG.isProxyMode() && TransportMode.parse(Voicechat.SERVER_CONFIG.transportMode.get()).tcp() && port != 0 && port == Bukkit.getPort()) {
             throw new IllegalArgumentException("TCP voice chat needs a port different from the Minecraft server port. Change port in voicechat-server.properties.");
         }
         this.server = Bukkit.getServer();
@@ -98,7 +101,7 @@ public class Server extends Thread {
     @Override
     public void run() {
         try {
-            if (Voicechat.SERVER_CONFIG.proxyMode.get()) {
+            if (Voicechat.SERVER_CONFIG.isProxyMode()) {
                 while (running) {
                     Thread.sleep(1000L);
                 }
@@ -170,6 +173,11 @@ public class Server extends Thread {
         return bindAddress;
     }
 
+    public boolean acceptsTransport(UUID uuid, java.net.SocketAddress address) {
+        VoiceProtocol protocol = Voicechat.SERVER.getProtocol(uuid);
+        return protocol != null && Voicechat.SERVER.isCompatible(uuid) && protocol.matches(address);
+    }
+
     public ClientConnection findVoiceSession(UUID uuid, java.net.SocketAddress address) {
         ClientConnection current = connections.get(uuid);
         if (current != null && current.getAddress().equals(address)) return current;
@@ -208,6 +216,11 @@ public class Server extends Thread {
         lastRoutingSent.remove(playerUUID);
         availabilityStates.remove(playerUUID);
         lastAudioSequences.remove(playerUUID);
+        pendingAuthentications.entrySet().removeIf(entry -> {
+            if (!entry.getValue().getPlayerUUID().equals(playerUUID)) return false;
+            socket.closeConnection(entry.getKey());
+            return true;
+        });
         ClientConnection checked = connections.remove(playerUUID);
         ClientConnection unchecked = unCheckedConnections.remove(playerUUID);
         if (checked != null) socket.closeConnection(checked.getAddress());
@@ -253,7 +266,7 @@ public class Server extends Thread {
                         });
                     }
                     pingManager.checkTimeouts();
-                    if (Voicechat.SERVER_CONFIG.proxyMode.get()) {
+                    if (Voicechat.SERVER_CONFIG.isProxyMode()) {
                         Thread.sleep(50L);
                         continue;
                     }
@@ -295,6 +308,17 @@ public class Server extends Thread {
                         if (secret == null || !secret.equals(packet.getSecret())) continue;
                         ClientConnection current = findVoiceSession(packet.getPlayerUUID(), message.getAddress());
                         if (current != null) { sendPacket(new AuthenticateAckPacket(), current); continue; }
+                        if (VoiceProtocol.LEGACY_UDP.matches(message.getAddress())) {
+                            // Match upstream: a new datagram endpoint cannot displace a live session.
+                            current = connections.get(packet.getPlayerUUID());
+                            if (current == null) current = unCheckedConnections.get(packet.getPlayerUUID());
+                            if (current == null) {
+                                current = new ClientConnection(packet.getPlayerUUID(), message.getAddress());
+                                unCheckedConnections.put(packet.getPlayerUUID(), current);
+                            }
+                            sendPacket(new AuthenticateAckPacket(), current);
+                            continue;
+                        }
                         pendingAuthentications.entrySet().removeIf(e -> e.getValue().getHandshake().expired());
                         ClientConnection pending = pendingAuthentications.get(message.getAddress());
                         if (pending == null) {
@@ -309,7 +333,7 @@ public class Server extends Thread {
                     }
                     if (message.getPacket() instanceof AuthenticationResponsePacket packet) {
                         ClientConnection pending = pendingAuthentications.get(message.getAddress());
-                        if (pending == null) continue;
+                        if (pending == null || !pending.getPlayerUUID().equals(message.getSenderUUID())) continue;
                         if (!pending.authenticate(packet.getData())) {
                             pendingAuthentications.remove(message.getAddress());
                             socket.closeConnection(message.getAddress());
@@ -376,6 +400,8 @@ public class Server extends Thread {
     }
 
     private boolean acceptAudioSequence(UUID player, MicPacket packet) {
+        // Upstream resets its counter when the microphone is recreated; UDP may also reorder.
+        if (Voicechat.SERVER.getProtocol(player) == VoiceProtocol.LEGACY_UDP) return true;
         long sequence = packet.getSequenceNumber();
         Long previous = lastAudioSequences.get(player);
         if (sequence < 0 || (previous != null && sequence <= previous)) return false;
@@ -398,7 +424,7 @@ public class Server extends Thread {
 
     private void sendProxyRoutingStates() {
         long now = System.currentTimeMillis();
-        boolean proxy = Voicechat.SERVER_CONFIG.proxyMode.get();
+        boolean proxy = Voicechat.SERVER_CONFIG.isProxyMode();
         for (Player sender : Bukkit.getOnlinePlayers()) {
             UUID uuid = sender.getUniqueId();
             PlayerState state = playerStateManager.getState(uuid);
@@ -410,7 +436,7 @@ public class Server extends Thread {
             }
             int status = voiceAvailability(sender);
             if (!proxy) {
-                if (connection != null && !java.util.Objects.equals(availabilityStates.put(uuid, status), status)) {
+                if (connection != null && !connection.isLegacy() && !java.util.Objects.equals(availabilityStates.put(uuid, status), status)) {
                     sendPacket(new AvailabilityPacket(status), connection);
                 }
                 continue;
@@ -440,7 +466,7 @@ public class Server extends Thread {
 
     /** Called only on the server thread, over the proxy-owned control channel. */
     public void handleProxyControl(Player player, byte[] bytes) {
-        if (!Voicechat.SERVER_CONFIG.proxyMode.get() || !Voicechat.SERVER.isCompatible(player)) return;
+        if (!Voicechat.SERVER_CONFIG.isProxyMode() || !Voicechat.SERVER.isCompatible(player)) return;
         try {
             ProxyMessages.Message message = ProxyMessages.decode(bytes);
             if (message.generation() != proxyRoutingGeneration) return;
@@ -484,7 +510,11 @@ public class Server extends Thread {
     }
 
     public void sendConnectionMessage(ClientConnection connection, NetworkMessage message) throws Exception {
-        if (Voicechat.SERVER_CONFIG.proxyMode.get()) {
+        if (Voicechat.SERVER.getProtocol(connection.getPlayerUUID()) == VoiceProtocol.LEGACY_UDP
+                && (message.getPacket() instanceof AvailabilityPacket
+                || message.getPacket() instanceof AuthenticationChallengePacket
+                || message.getPacket() instanceof AuthenticationResponsePacket)) return;
+        if (Voicechat.SERVER_CONFIG.isProxyMode()) {
             if (connection.getProxySession() == null || connections.get(connection.getPlayerUUID()) != connection) return;
             Player player = server.getPlayer(connection.getPlayerUUID());
             if (player == null || spectatorBlocked(player)) return;
@@ -726,7 +756,7 @@ public class Server extends Thread {
         return connections
                 .values()
                 .stream()
-                .filter(connection -> connection.getAddress().equals(message.getAddress()))
+                .filter(connection -> connection.getPlayerUUID().equals(message.getSenderUUID()) && connection.getAddress().equals(message.getAddress()))
                 .findAny()
                 .orElse(null);
     }
@@ -736,7 +766,7 @@ public class Server extends Thread {
         return unCheckedConnections
                 .values()
                 .stream()
-                .filter(connection -> connection.getAddress().equals(message.getAddress()))
+                .filter(connection -> connection.getPlayerUUID().equals(message.getSenderUUID()) && connection.getAddress().equals(message.getAddress()))
                 .findAny()
                 .orElse(null);
     }

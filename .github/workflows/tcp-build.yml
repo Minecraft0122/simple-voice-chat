@@ -19,11 +19,11 @@ jobs:
         with:
           distribution: temurin
           java-version: '25'
-      - name: Run real TCP transport regressions
+      - name: Run real TCP and UDP transport regressions
         run: bash scripts/test-tcp.sh
       - name: Run central proxy protocol regressions
         run: bash scripts/test-proxy.sh
-      - name: Run central proxy session and backend regressions
+      - name: Run TCP and mixed UDP proxy session regressions
         run: bash scripts/test-runtime.sh
       - name: Run actual client lifecycle regressions with game and audio doubles
         run: python3 tests/client/run.py
@@ -48,6 +48,10 @@ jobs:
             tasks+=(:bukkit:build :velocity:build :bungeecord:build)
           fi
           bash gradlew "${tasks[@]}" --console=plain
+      - name: Test common and Bukkit direct protocol codecs
+        run: python3 tests/direct/run.py
+      - name: Test proxy detection and generated configuration migration
+        run: python3 tests/config/run.py
       - uses: actions/upload-artifact@v4
         with:
           name: simple-voice-chat-tcp

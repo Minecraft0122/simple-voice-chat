@@ -2,6 +2,8 @@ package de.maxhenkel.voicechat.sniffer;
 
 import de.maxhenkel.voicechat.VoiceProxy;
 import de.maxhenkel.voicechat.voice.transport.VoiceAvailability;
+import de.maxhenkel.voicechat.voice.transport.VoiceProtocol;
+import de.maxhenkel.voicechat.voice.transport.TransportMode;
 import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
 import java.util.*;
@@ -35,7 +37,9 @@ public class VoiceProxySniffer {
         if (!fromServer && VoiceProxy.isPrivateChannel(channel)) return ByteBuffer.allocate(0);
         if (!fromServer && channel.equals(VoiceProxy.REQUEST_SECRET_CHANNEL)) {
             if (message.remaining() != 4) throw new IncompatibleVoiceChatException("Invalid secret request");
-            compatibilityVersionMap.put(player, message.getInt());
+            int version = message.getInt();
+            Integer previous = compatibilityVersionMap.putIfAbsent(player, version);
+            if (previous != null && previous != version) return ByteBuffer.allocate(0);
             requestedAt.put(player, System.currentTimeMillis());
             voiceProxy.availability(player, VoiceAvailability.WAITING);
             return null;
@@ -62,9 +66,9 @@ public class VoiceProxySniffer {
 
     private ByteBuffer handleSecret(ByteBuffer message, UUID player) throws IncompatibleVoiceChatException {
         Integer version = compatibilityVersionMap.get(player);
-        if (version == null || version != VoiceProxy.COMPATIBILITY_VERSION) {
+        if (version == null || !TransportMode.parse(voiceProxy.getConfig().transportMode.get()).supports(VoiceProtocol.fromVersion(version))) {
             internalError(player, "Missing or incompatible client protocol version");
-            throw new IncompatibleVoiceChatException("Matching TCP client required");
+            throw new IncompatibleVoiceChatException("Supported voice client and enabled transport required");
         }
         SniffedSecretPacket packet = SniffedSecretPacket.fromBytes(message, version);
         if (packet.getServerPort() != -1) {
@@ -145,6 +149,7 @@ public class VoiceProxySniffer {
     }
 
     public synchronized void onPlayerServerDisconnect(UUID player) {
+        voiceProxy.disconnectBridge(player);
         UUID backendPlayer = backendPlayerMap.remove(player);
         if (backendPlayer != null) {
             playerUUIDMap.remove(backendPlayer, player);
@@ -156,6 +161,10 @@ public class VoiceProxySniffer {
         routes.remove(player);
         requestedAt.remove(player);
         errors.remove(player);
+    }
+
+    public VoiceProtocol getProtocol(UUID player) {
+        return VoiceProtocol.fromVersion(compatibilityVersionMap.getOrDefault(player, -1));
     }
 
     public byte[] getSecret(UUID player) {

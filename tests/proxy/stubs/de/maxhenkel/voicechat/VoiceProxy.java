@@ -17,6 +17,7 @@ public class VoiceProxy {
     public record Value<T>(T value) { public T get() { return value; } }
     public static class Config {
         public Value<String> bindAddress = new Value<>("127.0.0.1"), voiceHost = new Value<>("");
+        public Value<String> transportMode = new Value<>("tcp");
         public Value<Boolean> allowPings = new Value<>(true);
     }
     public record Delivery(UUID player, String channel, byte[] data) {}
@@ -34,7 +35,7 @@ public class VoiceProxy {
     public String backendId(UUID p) { return "test-backend"; }
     public VoiceProxySniffer getSniffer() { return sniffer; }
     public void disconnectBridge(UUID p) { if (server != null) server.disconnect(p); }
-    public void availability(UUID p, int state) { sendToPlayer(p, AVAILABILITY_CHANNEL, new byte[]{(byte) state}); }
+    public void availability(UUID p, int state) { if (sniffer.getProtocol(p) != de.maxhenkel.voicechat.voice.transport.VoiceProtocol.TCP) return; sendToPlayer(p, AVAILABILITY_CHANNEL, new byte[]{(byte) state}); }
     public void sendToPlayer(UUID p, String channel, byte[] bytes) { client.add(new Delivery(p, channel, bytes)); }
     public void sendToBackend(UUID p, String channel, byte[] bytes) { backend.add(new Delivery(p, channel, bytes)); }
     public void routingChanged(UUID p) { if (server != null) server.routingChanged(p); }
