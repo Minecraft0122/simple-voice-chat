@@ -339,12 +339,7 @@ public class Server extends Thread {
                     long now = System.currentTimeMillis();
                     if (now - lastProxyRoutingUpdate >= 250L && routingUpdateQueued.compareAndSet(false, true)) {
                         lastProxyRoutingUpdate = now;
-                        server.execute(() -> {
-                            try { if (running) Server.this.sendProxyRoutingStates(); }
-                            finally {
-                                if (!CommonCompatibilityManager.INSTANCE.isFolia()) routingUpdateQueued.set(false);
-                            }
-                        });
+                        scheduleProxyRoutingUpdate();
                     }
                     pingManager.checkTimeouts();
                     if (Voicechat.SERVER_CONFIG.proxyMode.get()) {
@@ -486,6 +481,31 @@ public class Server extends Thread {
         if (state == null) return VoiceAvailability.WAITING;
         if (state.isDisabled()) return VoiceAvailability.DISABLED;
         return VoiceAvailability.AVAILABLE;
+    }
+
+    private void scheduleProxyRoutingUpdate() {
+        try {
+            // Folia rejects MinecraftServer.execute; use the platform's global scheduler.
+            CommonCompatibilityManager.INSTANCE.execute(server, () -> {
+                if (!running) {
+                    routingUpdateQueued.set(false);
+                    return;
+                }
+                try {
+                    sendProxyRoutingStates();
+                } catch (RuntimeException | Error e) {
+                    routingUpdateQueued.set(false);
+                    throw e;
+                } finally {
+                    // Folia keeps ownership until its entity snapshots and routing update finish.
+                    if (!CommonCompatibilityManager.INSTANCE.isFolia()) routingUpdateQueued.set(false);
+                }
+            });
+        } catch (RuntimeException | Error e) {
+            // A rejected submission must not prevent every subsequent routing update.
+            routingUpdateQueued.set(false);
+            throw e;
+        }
     }
 
     private void sendProxyRoutingStates() {

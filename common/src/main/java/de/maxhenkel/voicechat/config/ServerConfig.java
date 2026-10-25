@@ -139,6 +139,8 @@ public class ServerConfig {
                 .booleanEntry("proxy_mode", false,
                         "If a Velocity/BungeeCord proxy handles voice packets and this server only sends routing metadata",
                         "Enable this on backend servers when using the central TCP voice proxy",
+                        "Folia 26.1.2: set proxy_mode=true and install the Paper JAR on the backend",
+                        "Folia 后端必须设为 true，安装对应游戏版本的 Paper 插件；Fabric 文件用于 Fabric 客户端或服务端",
                         "The proxy must use the same TCP voice chat fork and is trusted with voice encryption keys"
                 );
     }
