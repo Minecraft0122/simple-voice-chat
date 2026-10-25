@@ -18,12 +18,12 @@ fi
 
 mkdir -p "$output_directory"
 "$java_compiler" --release 25 -encoding UTF-8 -d "$output_directory" \
-    "$transport_directory/TcpFrameCodec.java" \
-    "$transport_directory/TcpConnection.java" \
-    "$transport_directory/TcpServer.java" \
+    "$transport_directory"/*.java \
     "$api_directory/ClientVoicechatSocket.java" \
     "$api_directory/RawUdpPacket.java" \
     "$common_impl_directory/RawUdpPacketImpl.java" \
     "$client_impl_directory/ClientVoicechatSocketImpl.java" \
-    "$repository_root/tests/transport/TcpTransportTest.java"
+    "$repository_root/tests/transport/TcpTransportTest.java" \
+    "$repository_root/tests/transport/DualTransportTest.java"
 "$java_runtime" -ea -cp "$output_directory" TcpTransportTest
+"$java_runtime" -ea -cp "$output_directory" DualTransportTest

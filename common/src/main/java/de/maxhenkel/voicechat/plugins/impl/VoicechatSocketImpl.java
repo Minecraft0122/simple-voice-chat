@@ -5,15 +5,17 @@ import de.maxhenkel.voicechat.api.RawUdpPacket;
 import de.maxhenkel.voicechat.api.VoicechatSocket;
 import de.maxhenkel.voicechat.intercompatibility.CommonCompatibilityManager;
 import de.maxhenkel.voicechat.voice.transport.TcpServer;
+import de.maxhenkel.voicechat.voice.transport.DualVoiceServer;
+import de.maxhenkel.voicechat.voice.transport.TransportMode;
 
 import javax.annotation.Nullable;
 import java.net.*;
 
-/** Server-side voice socket backed by the TCP transport. */
+/** Server-side socket for the configured TCP and/or UDP transports. */
 public class VoicechatSocketImpl implements VoicechatSocket {
 
     @Nullable
-    private volatile TcpServer server;
+    private volatile DualVoiceServer server;
 
     @Override
     public synchronized void open(int port, String bindAddress) throws Exception {
@@ -34,21 +36,13 @@ public class VoicechatSocketImpl implements VoicechatSocket {
             requestedAddress = "";
         }
         long timeout = Math.max(30_000L, Voicechat.SERVER_CONFIG.keepAlive.get() * 10L);
-        TcpServer transport = new TcpServer((int) Math.min(Integer.MAX_VALUE, timeout));
+        DualVoiceServer transport = new DualVoiceServer(TransportMode.parse(Voicechat.SERVER_CONFIG.transportMode.get()), (int) Math.min(Integer.MAX_VALUE, timeout));
         try {
-            try {
-                transport.open(port, requestedAddress);
-            } catch (BindException e) {
-                if (requestedAddress.isEmpty() || requestedAddress.equals("0.0.0.0")) {
-                    throw e;
-                }
-                Voicechat.LOGGER.error("Failed to bind to address '{}', binding to wildcard IP instead", requestedAddress);
-                transport.open(port, "");
-            }
+            transport.open(port, requestedAddress);
             server = transport;
         } catch (BindException e) {
             transport.close();
-            Voicechat.LOGGER.error("Failed to run voice chat at TCP port {}, make sure no other application is running at that port", port);
+            Voicechat.LOGGER.error("Failed to run voice chat at voice port {}, make sure no other application is running at that port", port);
             Voicechat.LOGGER.error("Voice chat server error", e);
             if (dedicated) {
                 Voicechat.LOGGER.error("Shutting down server");
@@ -84,7 +78,7 @@ public class VoicechatSocketImpl implements VoicechatSocket {
 
     @Override
     public RawUdpPacket read() throws Exception {
-        TcpServer current = server;
+        DualVoiceServer current = server;
         if (current == null) {
             throw new IllegalStateException("Socket not opened yet");
         }
@@ -94,7 +88,7 @@ public class VoicechatSocketImpl implements VoicechatSocket {
 
     @Override
     public void send(byte[] data, SocketAddress address) throws Exception {
-        TcpServer current = server;
+        DualVoiceServer current = server;
         if (current == null || current.isClosed()) {
             return;
         }
@@ -103,7 +97,7 @@ public class VoicechatSocketImpl implements VoicechatSocket {
 
     @Override
     public void closeConnection(SocketAddress address) {
-        TcpServer current = server;
+        DualVoiceServer current = server;
         if (current != null) {
             current.closeConnection(address);
         }
@@ -111,13 +105,13 @@ public class VoicechatSocketImpl implements VoicechatSocket {
 
     @Override
     public int getLocalPort() {
-        TcpServer current = server;
+        DualVoiceServer current = server;
         return current == null ? -1 : current.getLocalPort();
     }
 
     @Override
     public synchronized void close() {
-        TcpServer current = server;
+        DualVoiceServer current = server;
         server = null;
         if (current != null) {
             current.close();
@@ -126,7 +120,7 @@ public class VoicechatSocketImpl implements VoicechatSocket {
 
     @Override
     public boolean isClosed() {
-        TcpServer current = server;
+        DualVoiceServer current = server;
         return current == null || current.isClosed();
     }
 }
