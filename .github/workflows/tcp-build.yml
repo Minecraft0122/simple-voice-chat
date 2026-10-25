@@ -42,6 +42,13 @@ jobs:
         shell: bash
         run: |
           tasks=(:fabric:build :paper:build :neoforge:build)
+          # Platform overrides must match the release version used by mods.
+          if grep -q '^minecraft_version=26.3' gradle.properties; then
+            version=$(sed -n 's/^mod_version=//p' gradle.properties)
+            for platform in bukkit velocity bungeecord; do
+              grep -qx "mod_version=$version" "$platform/gradle.properties" || exit 1
+            done
+          fi
           if ! grep -q '^minecraft_version=26.3' gradle.properties; then
             tasks+=(:forge:build)
           else
