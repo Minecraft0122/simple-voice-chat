@@ -21,15 +21,14 @@ if ($JavaHome) {
 
 New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
 $SourceFiles = @(
-    (Join-Path $TransportDirectory 'TcpFrameCodec.java'),
-    (Join-Path $TransportDirectory 'TcpConnection.java'),
-    (Join-Path $TransportDirectory 'TcpServer.java'),
+    (Get-ChildItem (Join-Path $TransportDirectory '*.java')).FullName,
     # Compile the real, dependency-free client adapter and packet envelope too.
     (Join-Path $ApiDirectory 'ClientVoicechatSocket.java'),
     (Join-Path $ApiDirectory 'RawUdpPacket.java'),
     (Join-Path $CommonImplDirectory 'RawUdpPacketImpl.java'),
     (Join-Path $ClientImplDirectory 'ClientVoicechatSocketImpl.java'),
-    (Join-Path $TestDirectory 'TcpTransportTest.java')
+    (Join-Path $TestDirectory 'TcpTransportTest.java'),
+    (Join-Path $TestDirectory 'DualTransportTest.java')
 )
 foreach ($SourceFile in $SourceFiles) {
     if (-not (Test-Path -LiteralPath $SourceFile -PathType Leaf)) {
@@ -45,3 +44,6 @@ if ($LASTEXITCODE -ne 0) {
 if ($LASTEXITCODE -ne 0) {
     throw "TCP transport regression tests failed (exit $LASTEXITCODE)."
 }
+
+& $JavaRuntime -ea -cp $OutputDirectory DualTransportTest
+if ($LASTEXITCODE -ne 0) { throw "Dual transport regression tests failed" }
