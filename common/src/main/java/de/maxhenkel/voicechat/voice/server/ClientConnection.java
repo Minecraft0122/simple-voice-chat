@@ -22,6 +22,10 @@ public class ClientConnection {
         return authenticated && !(packet instanceof de.maxhenkel.voicechat.voice.common.AuthenticationChallengePacket)
                 ? de.maxhenkel.voicechat.voice.common.Secret.fromBytes(handshake.serverKey()) : server.getSecret(playerUUID);
     }
+    public boolean isLegacy() {
+        return de.maxhenkel.voicechat.voice.transport.VoiceProtocol.LEGACY_UDP.matches(address);
+    }
+
     protected final UUID playerUUID;
     protected final SocketAddress address;
     protected long lastKeepAliveResponse;

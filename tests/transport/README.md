@@ -19,3 +19,10 @@ sh ./scripts/test-tcp.sh
 Both runners honor `JAVA_HOME`, compile only the dependency-free transport, client adapter, API envelope, and test sources, and write class files to the ignored `build/transport-tests` directory. They fail with a nonzero exit status if compilation or any test fails. Each test has a bounded timeout, so a blocked read is reported as a failure instead of hanging the suite indefinitely.
 
 The cases cover minimum and maximum frame sizes, network byte order, fragmented and coalesced input, invalid lengths, incomplete headers and payloads, concurrent writers, bounded queues, client address routing, receive timestamps, malformed-client isolation, disconnects, reconnects, shutdown unblocking, and the dependency-free client adapter's connect/read/close lifecycle. The tests do not launch Minecraft or verify audio playback, mod loading, or performance under real-world network congestion.
+
+## Dual transport
+
+The same runners also execute DualTransportTest with actual TCP and UDP sockets.
+It checks protocol allowlists, same-number listeners, same-source endpoint separation,
+UDP size limits, atomic bind rollback, per-transport shutdown and single-mode isolation.
+Proxy mixed-client and direct codec coverage is documented in docs/dual-transport.md.

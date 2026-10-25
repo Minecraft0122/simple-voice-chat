@@ -1,0 +1,15 @@
+#!/usr/bin/env sh
+set -eu
+root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+out="$root/build/runtime-tests"
+proxy="$root/common-proxy/src/main/java/de/maxhenkel/voicechat"
+transport="$root/common/src/main/java/de/maxhenkel/voicechat/voice/transport"
+mkdir -p "$out"
+javac --release 25 -encoding UTF-8 -d "$out" \
+    "$proxy/network/ProxyVoiceSession.java" "$proxy/network/VoiceProxyServer.java" "$proxy/network/ProxyVoicePacketCodec.java" \
+    "$proxy/sniffer/VoiceProxySniffer.java" "$proxy/sniffer/SniffedSecretPacket.java" "$proxy/sniffer/IncompatibleVoiceChatException.java" \
+    "$proxy/util/ByteBufferWrapper.java" "$proxy/util/VarIntUtils.java" "$proxy/logging/VoiceChatLogger.java" "$proxy/logging/LogLevel.java" \
+    "$transport"/*.java \
+    "$root/tests/proxy/stubs/de/maxhenkel/voicechat/VoiceProxy.java" "$root/tests/proxy/ProxyRuntimeTest.java" "$root/tests/proxy/MixedProxyTest.java"
+java -ea -cp "$out" de.maxhenkel.voicechat.network.ProxyRuntimeTest
+java -ea -cp "$out" de.maxhenkel.voicechat.network.MixedProxyTest

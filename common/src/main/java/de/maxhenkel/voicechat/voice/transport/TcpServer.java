@@ -23,6 +23,7 @@ public final class TcpServer implements AutoCloseable {
     private final ConcurrentHashMap<SocketAddress, TcpConnection> connections = new ConcurrentHashMap<>();
     private final Object lifecycleLock = new Object();
     private final int idleTimeoutMillis;
+    private final boolean taggedEndpoints;
     private volatile boolean closed = true;
     private volatile ServerSocket serverSocket;
     private volatile IOException failure;
@@ -32,10 +33,15 @@ public final class TcpServer implements AutoCloseable {
     }
 
     public TcpServer(int idleTimeoutMillis) {
+        this(idleTimeoutMillis, false);
+    }
+
+    public TcpServer(int idleTimeoutMillis, boolean taggedEndpoints) {
         if (idleTimeoutMillis < 0) {
             throw new IllegalArgumentException("TCP voice idle timeout must not be negative");
         }
         this.idleTimeoutMillis = idleTimeoutMillis;
+        this.taggedEndpoints = taggedEndpoints;
     }
 
     /** Opens this listener once. A failed bind can be retried on the same instance. */
@@ -79,12 +85,12 @@ public final class TcpServer implements AutoCloseable {
                         // TcpConnection owns and closes that socket on failure.
                         continue;
                     }
-                    SocketAddress address = connection.getRemoteAddress();
+                    SocketAddress address = taggedEndpoints ? VoiceEndpoint.tcp(connection.getRemoteAddress()) : connection.getRemoteAddress();
                     if (connections.putIfAbsent(address, connection) != null) {
                         connection.close();
                         continue;
                     }
-                    Thread.ofVirtual().name("voicechat-tcp-reader").start(() -> readLoop(connection));
+                    Thread.ofVirtual().name("voicechat-tcp-reader").start(() -> readLoop(connection, address));
                 }
             }
         } catch (IOException e) {
@@ -99,8 +105,7 @@ public final class TcpServer implements AutoCloseable {
         }
     }
 
-    private void readLoop(TcpConnection connection) {
-        SocketAddress address = connection.getRemoteAddress();
+    private void readLoop(TcpConnection connection, SocketAddress address) {
         try {
             while (!connection.isClosed() && !closed) {
                 byte[] data = connection.read();
@@ -165,6 +170,11 @@ public final class TcpServer implements AutoCloseable {
         if (connection != null) {
             connection.close();
         }
+    }
+
+    public boolean isConnected(SocketAddress address) {
+        TcpConnection connection = connections.get(address);
+        return connection != null && !connection.isClosed();
     }
 
     @Override
