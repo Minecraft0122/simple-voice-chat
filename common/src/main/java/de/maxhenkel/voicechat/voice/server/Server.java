@@ -76,7 +76,7 @@ public class Server extends Thread {
             }
             int configPort = Voicechat.SERVER_CONFIG.voiceChatPort.get();
             if (CommonCompatibilityManager.INSTANCE.isFolia() && !Voicechat.SERVER_CONFIG.proxyMode.get()) {
-                throw new IllegalArgumentException("Folia requires proxyMode=true so voice routing stays on the proxy and entity work runs on region schedulers.");
+                throw new IllegalArgumentException("Folia requires proxy_mode=true so voice routing stays on the proxy and entity work runs on region schedulers.");
             }
             if (configPort == 0) throw new IllegalArgumentException("Voice chat port=0 is forbidden; configure a fixed TCP port (1..65535).");
             if (configPort < 0) {
@@ -570,22 +570,21 @@ public class Server extends Thread {
         for (ServerPlayer player : onlinePlayers) {
             CompletableFuture<ProxyPlayerSnapshot> snapshot = new CompletableFuture<>();
             snapshots.add(snapshot);
-            AtomicBoolean completed = new AtomicBoolean();
-            Runnable retired = () -> {
-                if (completed.compareAndSet(false, true)) snapshot.complete(null);
-            };
+            snapshot.completeOnTimeout(null, 1500L, TimeUnit.MILLISECONDS);
+            playerReferences.put(player.getUUID(), player);
+            Runnable retired = () -> snapshot.complete(null);
             try {
                 CommonCompatibilityManager.INSTANCE.executeForPlayer(server, player, () -> {
+                    if (!running || snapshot.isDone()) { retired.run(); return; }
                     try {
-                        ProxyPlayerSnapshot data = createProxyPlayerSnapshot(player, onlinePlayers);
-                        if (data != null) playerReferences.put(data.uuid(), player);
-                        if (completed.compareAndSet(false, true)) snapshot.complete(data);
-                    } catch (Exception e) {
+                        // Late completions lose to the timeout; never mutate a newer routing batch.
+                        snapshot.complete(createProxyPlayerSnapshot(player, onlinePlayers));
+                    } catch (Throwable e) {
+                        snapshot.complete(null);
                         Voicechat.LOGGER.warn("Could not read voice routing state for Folia player", e);
-                        if (completed.compareAndSet(false, true)) snapshot.complete(null);
                     }
                 }, retired);
-            } catch (Exception e) {
+            } catch (RuntimeException e) {
                 Voicechat.LOGGER.warn("Could not schedule voice routing snapshot for Folia player", e);
                 retired.run();
             }
@@ -595,6 +594,7 @@ public class Server extends Thread {
             try {
                 CommonCompatibilityManager.INSTANCE.execute(server, () -> {
                     try {
+                        if (!running) return;
                         List<ProxyPlayerSnapshot> available = snapshots.stream()
                                 .map(CompletableFuture::join)
                                 .filter(java.util.Objects::nonNull)
@@ -644,10 +644,16 @@ public class Server extends Thread {
         }
         for (ProxyPlayerSnapshot sender : players) {
             UUID uuid = sender.uuid();
+            ServerPlayer currentPlayer = playerReferences.get(uuid);
+            if (currentPlayer == null || server.getPlayerList().getPlayer(uuid) != currentPlayer
+                    || !Voicechat.SERVER.isCompatible(uuid)) continue;
             ClientConnection connection = connections.get(uuid);
             if (connection != null && now - connection.getLastKeepAliveResponse() > 3500L) {
-                proxyDisconnected(uuid);
-                connection = null;
+                ClientConnection expired = connection;
+                CommonCompatibilityManager.INSTANCE.executeForPlayer(server, currentPlayer, () -> {
+                    if (running && connections.get(uuid) == expired
+                            && System.currentTimeMillis() - expired.getLastKeepAliveResponse() > 3500L) proxyDisconnected(uuid);
+                }, () -> {});
             }
             int status = backendAudioRequired ? VoiceAvailability.DISABLED : foliaVoiceAvailability(sender);
             boolean allowed = status == VoiceAvailability.AVAILABLE;
@@ -800,17 +806,7 @@ public class Server extends Thread {
         double maxDistanceSquared = distance * distance;
         List<UUID> targets = new ArrayList<>();
 
-        if (CommonCompatibilityManager.INSTANCE.isFolia()) {
-            for (ServerPlayer receiver : server.getPlayerList().getPlayers()) {
-                if (receiver == sender) continue;
-                PlayerState receiverState = playerStateManager.getState(receiver.getUUID());
-                if (receiverState != null && !receiverState.isDisconnected() && !receiverState.isDisabled()
-                        && PermissionManager.INSTANCE.LISTEN_PERMISSION.hasPermission(receiver)) {
-                    targets.add(receiver.getUUID());
-                }
-            }
-            return List.copyOf(targets);
-        }
+       }
 
         for (ServerPlayer receiver : server.getPlayerList().getPlayers()) {
             if (receiver == sender || spectatorBlocked(receiver)) {

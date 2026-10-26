@@ -33,5 +33,27 @@ out = root / 'build/folia-scheduler-tests'
 out.mkdir(parents=True, exist_ok=True)
 java = out / 'FoliaRoutingSchedulerTest.java'
 java.write_text(source, encoding='utf-8')
-subprocess.run(['javac', '--release', '25', '-encoding', 'UTF-8', '-d', str(out), str(java)], check=True)
+version = next(line.split('=',1)[1] for line in (root / 'gradle.properties').read_text().splitlines() if line.startswith('java_version='))
+subprocess.run(['javac', '--release', version, '-encoding', 'UTF-8', '-d', str(out), str(java)], check=True)
 subprocess.run(['java', '-ea', '-cp', str(out), 'FoliaRoutingSchedulerTest'], check=True)
+
+# Exercise actual batch/adapter methods with controllable entity lifecycle doubles.
+batch = (root / 'tests/folia/FoliaBatchTest.java').read_text(encoding='utf-8')
+batch = batch.replace('// PRODUCTION_BATCH_METHOD', method(server, 'private void sendFoliaProxyRoutingStates()'))
+batch = batch.replace('// PRODUCTION_ENTITY_METHOD', method(paper, 'public void executeForPlayer(MinecraftServer server, ServerPlayer player, Runnable task, Runnable retired)'))
+java = out / 'FoliaBatchTest.java'
+java.write_text(batch, encoding='utf-8')
+subprocess.run(['javac', '--release', version, '-encoding', 'UTF-8', '-d', str(out), str(java)], check=True)
+subprocess.run(['java', '-ea', '-cp', str(out), 'FoliaBatchTest'], check=True)
+
+bukkit = root / 'bukkit/src/main/java/de/maxhenkel/voicechat/voice/server/Server.java'
+if bukkit.exists():
+    production = bukkit.read_text(encoding='utf-8')
+    process = method(production[production.index('private class ProcessThread'):], 'public void run()')
+    assert 'scheduleProxyRoutingUpdate();' in process
+    source = (root / 'tests/folia/BukkitRoutingSchedulerTest.java').read_text(encoding='utf-8')
+    source = source.replace('// PRODUCTION_ROUTING_METHOD', method(production, 'private void scheduleProxyRoutingUpdate()'))
+    java = out / 'BukkitRoutingSchedulerTest.java'
+    java.write_text(source, encoding='utf-8')
+    subprocess.run(['javac', '--release', version, '-encoding', 'UTF-8', '-d', str(out), str(java)], check=True)
+    subprocess.run(['java', '-ea', '-cp', str(out), 'BukkitRoutingSchedulerTest'], check=True)
