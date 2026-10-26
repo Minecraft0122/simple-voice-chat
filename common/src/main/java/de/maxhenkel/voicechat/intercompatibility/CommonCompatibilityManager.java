@@ -96,4 +96,10 @@ public abstract class CommonCompatibilityManager {
         server.execute(runnable);
     }
 
+    public boolean isFolia() { return false; }
+
+    public void executeForPlayer(MinecraftServer server, ServerPlayer player, Runnable task, Runnable retired) {
+        server.execute(task);
+    }
+
 }

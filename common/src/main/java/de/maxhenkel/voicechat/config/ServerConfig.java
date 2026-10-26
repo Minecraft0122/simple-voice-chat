@@ -131,12 +131,16 @@ public class ServerConfig {
                 );
         threadedServerSupport = builder
                 .booleanEntry("threaded_server_support", Voicechat.Loader.PAPER.equals(loader),
+                        "Folia: keep threaded server support enabled for region-threaded servers.",
+                        "Folia：区域线程服务端必须保持此项开启；修改后请完整重启。",
                         "If the voice chat should support servers that run multiple threads, like Folia",
                         "Disabling this may slightly improve performance, but can cause issues on servers that don't run everything on a single thread"
                 );
         allowSpectatorVoice = builder.booleanEntry("allow_spectator_voice", false, "Allow spectators to send and receive voice chat. Disabled by default.");
         proxyMode = builder
                 .booleanEntry("proxy_mode", false,
+                        "Folia: use the matching Paper backend JAR and enable proxy_mode; restart after changes",
+                        "Folia 请使用对应游戏版本的 Paper 插件并开启此项，修改后完整重启",
                         "If a Velocity/BungeeCord proxy handles voice packets and this server only sends routing metadata",
                         "Enable this on backend servers when using the central TCP voice proxy",
                         "The proxy must use the same TCP voice chat fork and is trusted with voice encryption keys"

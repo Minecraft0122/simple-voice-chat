@@ -7,12 +7,12 @@ import java.util.UUID;
 
 public class PlayerState {
 
-    private UUID uuid;
-    private String name;
-    private boolean disabled;
-    private boolean disconnected;
+    private volatile UUID uuid;
+    private volatile String name;
+    private volatile boolean disabled;
+    private volatile boolean disconnected;
     @Nullable
-    private UUID group;
+    private volatile UUID group;
 
     public PlayerState(UUID uuid, String name, boolean disabled, boolean disconnected) {
         this.uuid = uuid;

@@ -134,25 +134,21 @@ public class ServerVoiceEvents {
         }
 
         Timer timer = new Timer("%s-login-timer".formatted(serverPlayer.getGameProfile().name()), true);
+        MinecraftServer loginServer = serverPlayer.level().getServer();
         timer.schedule(new TimerTask() {
             @Override
             public void run() {
                 timer.cancel();
                 timer.purge();
-                if (!serverPlayer.level().getServer().isRunning()) {
-                    return;
-                }
-                if (!serverPlayer.connection.isAcceptingMessages()) {
-                    return;
-                }
-                if (!isCompatible(serverPlayer)) {
-                    CommonCompatibilityManager.INSTANCE.execute(serverPlayer.level().getServer(), () -> {
+                if (loginServer.isRunning()) {
+                    CommonCompatibilityManager.INSTANCE.executeForPlayer(loginServer, serverPlayer, () -> {
+                        if (!serverPlayer.connection.isAcceptingMessages() || isCompatible(serverPlayer)) return;
                         serverPlayer.connection.disconnect(
                                 Component.literal(Voicechat.TRANSLATIONS.forceVoicechatKickMessage.get().formatted(
                                         CommonCompatibilityManager.INSTANCE.getModName(),
                                         CommonCompatibilityManager.INSTANCE.getModVersion()
                                 )));
-                    });
+                    }, () -> {});
                 }
             }
         }, Voicechat.SERVER_CONFIG.loginTimeout.get());
