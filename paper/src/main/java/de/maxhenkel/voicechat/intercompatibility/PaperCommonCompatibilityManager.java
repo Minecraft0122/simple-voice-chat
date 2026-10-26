@@ -68,6 +68,7 @@ public class PaperCommonCompatibilityManager extends CommonCompatibilityManager 
 
     @EventHandler
     public void onServerStop(PluginDisableEvent event) {
+        if (event.getPlugin() != VoicechatPaperPlugin.INSTANCE) return;
         DedicatedServer server = ((CraftServer) Bukkit.getServer()).getServer();
         serverStoppingEvents.forEach(consumer -> consumer.accept(server));
         if (netManager != null) {
@@ -257,6 +258,21 @@ public class PaperCommonCompatibilityManager extends CommonCompatibilityManager 
     @Override
     public void execute(MinecraftServer server, Runnable runnable) {
         Bukkit.getServer().getGlobalRegionScheduler().execute(VoicechatPaperPlugin.INSTANCE, runnable);
+    }
+
+    @Override
+    public boolean isFolia() {
+        try {
+            Class.forName("io.papermc.paper.threadedregions.RegionizedServer");
+            return true;
+        } catch (ClassNotFoundException ignored) { return false; }
+    }
+
+    @Override
+    public void executeForPlayer(MinecraftServer server, ServerPlayer player, Runnable task, Runnable retired) {
+        if (player.getBukkitEntity().getScheduler().run(VoicechatPaperPlugin.INSTANCE, scheduledTask -> task.run(), retired) == null) {
+            retired.run();
+        }
     }
 
 }

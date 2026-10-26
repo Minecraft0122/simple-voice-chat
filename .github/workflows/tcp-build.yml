@@ -21,6 +21,8 @@ jobs:
           java-version: '25'
       - name: Run real TCP transport regressions
         run: bash scripts/test-tcp.sh
+      - name: Run Folia scheduling and entity lifecycle regressions
+        run: python3 tests/folia/run.py
 
   build:
     runs-on: ubuntu-latest
