@@ -51,6 +51,14 @@ public final class Voicechat extends JavaPlugin {
     public void onEnable() {
         INSTANCE = this;
         LOGGER = new JavaLoggingLogger(getLogger());
+        try {
+            Class.forName("io.papermc.paper.threadedregions.RegionizedServer");
+            LOGGER.error("Folia requires the matching voicechat-paper JAR with proxy_mode=true. The generic Bukkit JAR cannot safely read cross-region player state.");
+            disablePlugin();
+            return;
+        } catch (ClassNotFoundException ignored) {
+            // Regular Bukkit/Paper servers use the normal compatibility implementation.
+        }
 
         if (debugMode()) {
             LOGGER.warn("Running in debug mode - Don't leave this enabled in production!");
@@ -144,8 +152,8 @@ public final class Voicechat extends JavaPlugin {
         if (netManager != null) {
             netManager.onDisable();
         }
-        getServer().getServicesManager().unregister(apiService);
-        if (SERVER != null) {
+        if (apiService != null) getServer().getServicesManager().unregister(apiService);
+        if (SERVER != null && SERVER.getServer() != null) {
             SERVER.getServer().close();
         }
     }

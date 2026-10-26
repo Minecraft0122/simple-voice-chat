@@ -21,6 +21,8 @@ jobs:
           java-version: '25'
       - name: Run real TCP and UDP transport regressions
         run: bash scripts/test-tcp.sh
+      - name: Run Folia scheduling and entity lifecycle regressions
+        run: python3 tests/folia/run.py
       - name: Run central proxy protocol regressions
         run: bash scripts/test-proxy.sh
       - name: Run TCP and mixed UDP proxy session regressions

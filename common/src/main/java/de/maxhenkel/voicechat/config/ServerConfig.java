@@ -77,6 +77,8 @@ public class ServerConfig {
                 );
 
         proxyMode = builder.booleanEntry("proxy_mode", false,
+                "Folia: use the matching Paper backend JAR and enable proxy_mode; restart after changes",
+                "Folia 请使用对应游戏版本的 Paper 插件并开启此项，修改后完整重启",
                 "[Proxy / 代理] Force central voice proxy mode. Default: false; automatic detection still applies.",
                 "强制启用中央语音代理；false 时仍可自动识别。true 时后端仅上报路由，不监听语音端口。",
                 "Install this fork on Velocity/BungeeCord and every backend, with matching transport_mode.",
@@ -89,6 +91,14 @@ public class ServerConfig {
                 "自动检测结果仅在本次运行生效并输出日志，不回写 proxy_mode。修改配置后请重启。",
                 "Without this fork's voice proxy plugin, disable BOTH proxy_auto_detect and proxy_mode for direct voice.",
                 "若游戏代理未安装本分支语音插件而需要后端直连，请将两个代理选项均设为 false。");
+
+        threadedServerSupport = builder
+                .booleanEntry("threaded_server_support", Voicechat.Loader.PAPER.equals(loader),
+                        "Folia: keep threaded server support enabled for region-threaded servers.",
+                        "Folia：区域线程服务端必须保持此项开启；修改后请完整重启。",
+                        "If the voice chat should support servers that run multiple threads, like Folia",
+                        "Disabling this may slightly improve performance, but can cause issues on servers that don't run everything on a single thread"
+                );
 
         voiceChatDistance = builder
                 .doubleEntry("max_voice_distance", 48D, 1D, 1_000_000D,
@@ -176,11 +186,6 @@ public class ServerConfig {
                         "This is mostly relevant for voice chat addons"
                 );
 
-        threadedServerSupport = builder
-                .booleanEntry("threaded_server_support", Voicechat.Loader.PAPER.equals(loader),
-                        "If the voice chat should support servers that run multiple threads, like Folia",
-                        "Disabling this may slightly improve performance, but can cause issues on servers that don't run everything on a single thread"
-                );
     }
 
     /** Resolve at startup before validating or opening a voice listener. */

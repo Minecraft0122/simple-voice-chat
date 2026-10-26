@@ -242,7 +242,7 @@ public class Server extends Thread {
     }
 
     private class ProcessThread extends Thread {
-        private boolean running;
+        private volatile boolean running;
         private long lastKeepAlive;
 
         public ProcessThread() {
@@ -260,10 +260,7 @@ public class Server extends Thread {
                     long now = System.currentTimeMillis();
                     if (now - lastProxyRoutingUpdate >= 250L && routingUpdateQueued.compareAndSet(false, true)) {
                         lastProxyRoutingUpdate = now;
-                        Voicechat.compatibility.runTask(() -> {
-                            try { if (running) Server.this.sendProxyRoutingStates(); }
-                            finally { routingUpdateQueued.set(false); }
-                        });
+                        scheduleProxyRoutingUpdate();
                     }
                     pingManager.checkTimeouts();
                     if (Voicechat.SERVER_CONFIG.isProxyMode()) {
@@ -420,6 +417,19 @@ public class Server extends Thread {
         if (state == null) return VoiceAvailability.WAITING;
         if (state.isDisabled()) return VoiceAvailability.DISABLED;
         return VoiceAvailability.AVAILABLE;
+    }
+
+    private void scheduleProxyRoutingUpdate() {
+        try {
+            Voicechat.compatibility.runTask(() -> {
+                try { if (running) sendProxyRoutingStates(); }
+                finally { routingUpdateQueued.set(false); }
+            });
+        } catch (RuntimeException | Error e) {
+            // Submission can fail before the callback gets a chance to release ownership.
+            routingUpdateQueued.set(false);
+            throw e;
+        }
     }
 
     private void sendProxyRoutingStates() {
