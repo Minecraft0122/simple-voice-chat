@@ -806,8 +806,6 @@ public class Server extends Thread {
         double maxDistanceSquared = distance * distance;
         List<UUID> targets = new ArrayList<>();
 
-       }
-
         for (ServerPlayer receiver : server.getPlayerList().getPlayers()) {
             if (receiver == sender || spectatorBlocked(receiver)) {
                 continue;
