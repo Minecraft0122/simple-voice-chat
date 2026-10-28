@@ -211,5 +211,7 @@
   "message.voicechat.unavailable_on_server": "语音聊天在此子服不可用，语音插件未安装或未启用。",
   "message.voicechat.server_internal_error": "服务器内部错误，语音聊天已停止。请联系管理员。",
   "message.voicechat.spectator_disabled": "旁观模式下无法使用语音聊天。",
-  "message.voicechat.voice_disabled": "语音聊天已停用。"
+  "message.voicechat.voice_disabled": "语音聊天已停用。",
+  "message.voicechat.server_busy": "语音聊天当前繁忙，请稍后再试。",
+  "message.voicechat.muted_by_server": "服务器已禁止你使用语音聊天。"
 }

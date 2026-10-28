@@ -59,12 +59,16 @@ public class Server extends Thread {
     private final PlayerStateManager playerStateManager;
     private final ServerGroupManager groupManager;
     private final ServerCategoryManager categoryManager;
+    private final VoiceProtectionManager protectionManager;
+    private final VoiceModerationCache moderationCache;
     private volatile boolean running = true;
     private final Map<UUID, ProxyRoutingPacket> lastRoutingStates = new ConcurrentHashMap<>();
     private final Map<UUID, Long> lastRoutingSent = new ConcurrentHashMap<>();
     private long lastProxyRoutingUpdate;
     private final long proxyRoutingGeneration = new SecureRandom().nextLong();
     private long proxyRoutingSequence;
+    private long lastBandwidthMetricsRefresh;
+    private long lastModerationMaintenance;
 
     public Server() {
         Voicechat.SERVER_CONFIG.detectProxy(id -> false);
@@ -89,12 +93,16 @@ public class Server extends Thread {
         playerStateManager = new PlayerStateManager();
         groupManager = new ServerGroupManager();
         categoryManager = new ServerCategoryManager();
+        protectionManager = new VoiceProtectionManager(Voicechat.INSTANCE.getDataFolder().toPath());
+        moderationCache = new VoiceModerationCache(Voicechat.INSTANCE.getDataFolder().toPath());
         setDaemon(true);
         setName("VoiceChatServerThread");
         setUncaughtExceptionHandler(new VoicechatUncaughtExceptionHandler());
         processThread = new ProcessThread();
         lastProxyRoutingUpdate = 0L;
         proxyRoutingSequence = 0L;
+        lastBandwidthMetricsRefresh = 0L;
+        lastModerationMaintenance = 0L;
         processThread.start();
     }
 
@@ -258,6 +266,15 @@ public class Server extends Thread {
             while (running) {
                 try {
                     long now = System.currentTimeMillis();
+                    if (now - lastBandwidthMetricsRefresh >= 1000L) {
+                        lastBandwidthMetricsRefresh = now;
+                        protectionManager.refreshServerMetrics();
+                    }
+                    if (now - lastModerationMaintenance >= 60_000L) {
+                        lastModerationMaintenance = now;
+                        moderationCache.enqueuePeriodic();
+                        moderationCache.cleanup();
+                    }
                     if (now - lastProxyRoutingUpdate >= 250L && routingUpdateQueued.compareAndSet(false, true)) {
                         lastProxyRoutingUpdate = now;
                         scheduleProxyRoutingUpdate();
@@ -416,7 +433,7 @@ public class Server extends Thread {
         PlayerState state = playerStateManager.getState(player.getUniqueId());
         if (state == null) return VoiceAvailability.WAITING;
         if (state.isDisabled()) return VoiceAvailability.DISABLED;
-        return VoiceAvailability.AVAILABLE;
+        return protectionManager.availability(player.getUniqueId());
     }
 
     private void scheduleProxyRoutingUpdate() {
@@ -451,7 +468,11 @@ public class Server extends Thread {
                 }
                 continue;
             }
-            boolean relay = PluginManager.instance().requiresBackendAudio() || Voicechat.SERVER_CONFIG.allowSpectatorVoice.get();
+            // Protection and moderation need to see every microphone frame. Direct proxy routing would bypass the backend.
+            boolean relay = PluginManager.instance().requiresBackendAudio() || Voicechat.SERVER_CONFIG.allowSpectatorVoice.get()
+                    || Voicechat.SERVER_CONFIG.pluginBandwidthLimitMbps.get() > 0
+                    || Voicechat.SERVER_CONFIG.serverBandwidthLimitMbps.get() > 0
+                    || Voicechat.SERVER_CONFIG.voiceModerationCacheEnabled.get();
             boolean allowed = status == VoiceAvailability.AVAILABLE;
             List<UUID> normal = allowed && !relay ? getProxyTargets(sender, false) : List.of();
             List<UUID> whisper = allowed && !relay ? getProxyTargets(sender, true) : List.of();
@@ -528,6 +549,7 @@ public class Server extends Thread {
             if (connection.getProxySession() == null || connections.get(connection.getPlayerUUID()) != connection) return;
             Player player = server.getPlayer(connection.getPlayerUUID());
             if (player == null || spectatorBlocked(player)) return;
+            if (message.getPacket() instanceof SoundPacket<?> sound) protectionManager.recordOutbound(sound.getData().length);
             NetManager.sendToClient(player, new ProxyAudioPacket(ProxyMessages.encode(ProxyMessages.SOUND,
                     proxyRoutingGeneration, connection.getProxySession(), message.writePlaintext())));
         } else {
@@ -584,7 +606,14 @@ public class Server extends Thread {
         if (player == null) {
             return;
         }
+        byte[] audio = packet.getData();
+        protectionManager.recordInbound(playerUuid, audio == null ? 0 : audio.length);
+        if (audio == null || audio.length == 0) {
+            protectionManager.release(playerUuid);
+            return;
+        }
         if (voiceAvailability(player) != VoiceAvailability.AVAILABLE) return;
+        if (!protectionManager.tryAdmit(playerUuid)) return;
         if (!player.hasPermission(PermissionManager.SPEAK_PERMISSION)) {
             CooldownTimer.run("no-speak-" + playerUuid, () -> {
                 NetManager.sendStatusMessage(player, "message.voicechat.no_speak_permission");
@@ -595,6 +624,7 @@ public class Server extends Thread {
         if (state == null) {
             return;
         }
+        moderationCache.record(playerUuid, packet);
         if (!PluginManager.instance().onMicPacket(player, state, packet)) {
             processMicPacket(player, state, packet);
         }
@@ -823,6 +853,7 @@ public class Server extends Thread {
      * @throws Exception if an I/O error occurs
      */
     public void sendPacketRaw(Packet<?> packet, ClientConnection connection) throws Exception {
+        if (packet instanceof SoundPacket<?> sound) protectionManager.recordOutbound(sound.getData().length);
         connection.send(this, new NetworkMessage(packet));
     }
 
@@ -841,5 +872,8 @@ public class Server extends Thread {
     public ServerCategoryManager getCategoryManager() {
         return categoryManager;
     }
+
+    public VoiceProtectionManager getProtectionManager() { return protectionManager; }
+    public VoiceModerationCache getModerationCache() { return moderationCache; }
 
 }

@@ -9,6 +9,8 @@ public final class VoiceAvailability {
     public static final int SPECTATOR = 4;
     public static final int NO_PERMISSION = 5;
     public static final int DISABLED = 6;
+    public static final int SERVER_BUSY = 7;
+    public static final int MUTED = 8;
     private VoiceAvailability() {}
 
     public static String translationKey(int status) {
@@ -19,6 +21,8 @@ public final class VoiceAvailability {
             case SPECTATOR -> "message.voicechat.spectator_disabled";
             case NO_PERMISSION -> "message.voicechat.no_speak_permission";
             case DISABLED -> "message.voicechat.voice_disabled";
+            case SERVER_BUSY -> "message.voicechat.server_busy";
+            case MUTED -> "message.voicechat.muted_by_server";
             default -> "message.voicechat.server_internal_error";
         };
     }

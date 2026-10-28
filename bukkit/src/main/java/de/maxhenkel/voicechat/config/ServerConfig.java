@@ -32,6 +32,14 @@ public class ServerConfig {
     public final ConfigEntry<Boolean> proxyAutoDetect;
     private boolean detectedProxy;
     public final ConfigEntry<Boolean> allowSpectatorVoice;
+    public ConfigEntry<Integer> pluginBandwidthLimitMbps;
+    public ConfigEntry<Integer> serverBandwidthLimitMbps;
+    public ConfigEntry<String> serverBandwidthMetricsFile;
+    public ConfigEntry<Integer> bandwidthRecoveryPercent;
+    public ConfigEntry<Integer> voiceTalkerLeaseSeconds;
+    public ConfigEntry<Boolean> voiceModerationCacheEnabled;
+    public ConfigEntry<Integer> voiceModerationCacheHours;
+    public ConfigEntry<Integer> voiceModerationCacheMaxMb;
 
     public ServerConfig(ConfigBuilder builder) {
         builder.header(String.format("%s server config v%s", BuildConstants.PLUGIN_NAME, Voicechat.INSTANCE.getDescription().getVersion()));
@@ -110,6 +118,31 @@ public class ServerConfig {
                 );
 
         allowSpectatorVoice = builder.booleanEntry("allow_spectator_voice", false, "Allow spectators to send and receive voice chat. Disabled by default.");
+
+        pluginBandwidthLimitMbps = builder.integerEntry("plugin_bandwidth_limit_mbps", 0, 0, Integer.MAX_VALUE,
+                "[Voice protection / 语音保护] Stop admitting new talkers at this plugin voice payload rate; 0 disables the limit.",
+                "插件语音收发速率达到此值后停止接纳新的说话者；0 表示不限制。单位 Mbps。",
+                "Existing talkers keep a short lease; frames from new talkers are rejected until usage recovers.",
+                "已开始说话的玩家可在租约期内继续；流量恢复后才接纳新的说话者。");
+        serverBandwidthLimitMbps = builder.integerEntry("server_bandwidth_limit_mbps", 0, 0, Integer.MAX_VALUE,
+                "Stop admitting new talkers at this whole-server network rate; requires a fresh metrics file. 0 disables the limit.",
+                "整台服务器网卡收发速率达到此值后停止接纳新的说话者；需要有效的网卡指标文件；0 表示不限制。单位 Mbps。");
+        serverBandwidthMetricsFile = builder.stringEntry("server_bandwidth_metrics_file", "config/voicechat/network-bandwidth.properties",
+                "A local monitor updates rx_bytes_per_second, tx_bytes_per_second and sampled_at_millis once per second.",
+                "由本机监控程序每秒更新 rx_bytes_per_second、tx_bytes_per_second、sampled_at_millis；缺失或过期时停止接纳新说话者。");
+        bandwidthRecoveryPercent = builder.integerEntry("bandwidth_recovery_percent", 80, 1, 99,
+                "Resume new talkers only below this percentage of the configured limit.",
+                "流量低于上限的此百分比后恢复接纳新说话者，用于避免限流状态频繁切换。");
+        voiceTalkerLeaseSeconds = builder.integerEntry("voice_talker_lease_seconds", 3, 1, 30,
+                "How long an active talker keeps admission after their last audio frame.",
+                "玩家最后一个音频包之后保留说话者准入的秒数。");
+        voiceModerationCacheEnabled = builder.booleanEntry("voice_moderation_cache_enabled", false,
+                "Cache Opus microphone frames for an external moderation program. Disabled by default.",
+                "是否将 Opus 语音片段缓存到磁盘供外部审核程序检查；默认关闭，请先告知玩家并配置本机审核程序。");
+        voiceModerationCacheHours = builder.integerEntry("voice_moderation_cache_hours", 12, 1, 168,
+                "Delete cached voice segments after this many hours.", "语音片段在磁盘上保留的小时数，到期自动删除；默认 12 小时。");
+        voiceModerationCacheMaxMb = builder.integerEntry("voice_moderation_cache_max_mb", 4096, 64, Integer.MAX_VALUE,
+                "Maximum disk space for cached voice segments.", "语音缓存最大磁盘空间，超过后优先删除最早片段。单位 MB。");
 
         spectatorInteraction = builder
                 .booleanEntry("spectator_interaction", false,

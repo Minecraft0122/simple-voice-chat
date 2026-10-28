@@ -28,6 +28,10 @@ public class VoiceChatCommands implements CommandExecutor, TabCompleter {
 
     @Override
     public boolean onCommand(CommandSender commandSender, Command command, String label, String[] args) {
+        if (args.length >= 1 && (args[0].equalsIgnoreCase("status") || args[0].equalsIgnoreCase("mute") || args[0].equalsIgnoreCase("unmute"))) {
+            return protectionCommand(commandSender, args);
+        }
+        if (args.length >= 1 && args[0].equalsIgnoreCase("report")) return reportCommand(commandSender, args);
         if (checkNoVoicechat(commandSender)) {
             return true;
         }
@@ -60,7 +64,7 @@ public class VoiceChatCommands implements CommandExecutor, TabCompleter {
     @Override
     public List<String> onTabComplete(CommandSender commandSender, Command command, String label, String[] args) {
         if (args.length == 1) {
-            return tabCompleteList(args[0], Arrays.asList("help", "test", "invite", "join", "leave"));
+            return tabCompleteList(args[0], Arrays.asList("help", "test", "invite", "join", "leave", "status", "mute", "unmute", "report"));
         }
 
         if (args.length == 2) {
@@ -80,6 +84,46 @@ public class VoiceChatCommands implements CommandExecutor, TabCompleter {
         }
 
         return Collections.emptyList();
+    }
+
+    private boolean protectionCommand(CommandSender sender, String[] args) {
+        if (!sender.hasPermission(PermissionManager.ADMIN_PERMISSION)) { sender.sendMessage("You do not have permission to manage voice chat."); return true; }
+        Server server = Voicechat.SERVER.getServer();
+        if (server == null) { sender.sendMessage("Voice chat is unavailable."); return true; }
+        if (args[0].equalsIgnoreCase("status")) {
+            var status = server.getProtectionManager().snapshot();
+            sender.sendMessage(String.format(java.util.Locale.ROOT, "Voice bandwidth: in=%.2f Mbps, out=%.2f Mbps, server=%s, admission=%s",
+                    status.inboundBytesPerSecond() * 8D / 1_000_000D, status.outboundBytesPerSecond() * 8D / 1_000_000D,
+                    status.serverBytesPerSecond() < 0 ? "unavailable" : String.format(java.util.Locale.ROOT, "%.2f Mbps", status.serverBytesPerSecond() * 8D / 1_000_000D),
+                    status.admissionBlocked() ? "blocked" : "open"));
+            sender.sendMessage("Muted players (" + status.mutedPlayers().size() + "): " + status.mutedPlayers().stream()
+                    .map(uuid -> { Player player = org.bukkit.Bukkit.getPlayer(uuid); return player == null ? uuid.toString() : player.getName(); }).limit(20).collect(Collectors.joining(", ")));
+            return true;
+        }
+        if (args.length < 2) { sender.sendMessage("Usage: /voicechat " + args[0] + " <player>"); return true; }
+        Player target = parsePlayer(sender, args[1]);
+        if (target == null) { sender.sendMessage("Player not found."); return true; }
+        try {
+            boolean mute = args[0].equalsIgnoreCase("mute");
+            if (mute) server.getProtectionManager().mute(target.getUniqueId()); else server.getProtectionManager().unmute(target.getUniqueId());
+            sender.sendMessage((mute ? "Muted " : "Unmuted ") + target.getName() + " for voice chat.");
+        } catch (Exception e) { sender.sendMessage("Could not update voice mute: " + e.getMessage()); }
+        return true;
+    }
+
+    private boolean reportCommand(CommandSender sender, String[] args) {
+        if (!(sender instanceof Player reporter)) { sender.sendMessage("Only a player can report voice chat."); return true; }
+        if (args.length < 2) { sender.sendMessage("Usage: /voicechat report <player> [reason]"); return true; }
+        Player target = parsePlayer(sender, args[1]);
+        if (target == null) { sender.sendMessage("Player not found."); return true; }
+        String reason = args.length > 2 ? String.join(" ", Arrays.copyOfRange(args, 2, args.length)) : "player_report";
+        Server server = Voicechat.SERVER.getServer();
+        if (server == null || !server.getModerationCache().report(target.getUniqueId(), reporter.getUniqueId(), reason)) {
+            sender.sendMessage("No recent cached voice audio is available, or voice moderation caching is disabled.");
+            return true;
+        }
+        sender.sendMessage("Voice report queued for " + target.getName() + ".");
+        return true;
     }
 
     private List<String> tabCompleteList(String arg, List<String> list) {

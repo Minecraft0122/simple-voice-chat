@@ -43,6 +43,15 @@ public class VoicechatCommands {
         literalBuilder.executes(commandSource -> help(dispatcher, commandSource));
         literalBuilder.then(Commands.literal("help").executes(commandSource -> help(dispatcher, commandSource)));
 
+        literalBuilder.then(Commands.literal("status").requires(source -> checkPermission(source, PermissionManager.INSTANCE.ADMIN_PERMISSION)).executes(VoicechatCommands::status));
+        literalBuilder.then(Commands.literal("mute").requires(source -> checkPermission(source, PermissionManager.INSTANCE.ADMIN_PERMISSION))
+                .then(Commands.argument("target", EntityArgument.player()).executes(VoicechatCommands::mute)));
+        literalBuilder.then(Commands.literal("unmute").requires(source -> checkPermission(source, PermissionManager.INSTANCE.ADMIN_PERMISSION))
+                .then(Commands.argument("target", EntityArgument.player()).executes(VoicechatCommands::unmute)));
+        literalBuilder.then(Commands.literal("report").then(Commands.argument("target", EntityArgument.player())
+                .executes(VoicechatCommands::report)
+                .then(Commands.argument("reason", StringArgumentType.greedyString()).executes(VoicechatCommands::report))));
+
         literalBuilder.then(Commands.literal("test").requires((commandSource) -> checkPermission(commandSource, PermissionManager.INSTANCE.ADMIN_PERMISSION)).then(Commands.argument("target", EntityArgument.player()).executes((commandSource) -> {
             if (checkNoVoicechat(commandSource)) {
                 return 0;
@@ -295,6 +304,64 @@ public class VoicechatCommands {
         } catch (CommandSyntaxException e) {
             return stack.permissions().hasPermission(new net.minecraft.server.permissions.Permission.HasCommandLevel(PermissionLevel.ADMINS));
         }
+    }
+
+    private static int status(CommandContext<CommandSourceStack> context) {
+        Server server = Voicechat.SERVER.getServer();
+        if (server == null) { context.getSource().sendFailure(Component.translatable("message.voicechat.voice_chat_unavailable")); return 0; }
+        var snapshot = server.getProtectionManager().snapshot();
+        context.getSource().sendSuccess(() -> Component.literal("Voice bandwidth: in=" + mbps(snapshot.inboundBytesPerSecond())
+                + " Mbps, out=" + mbps(snapshot.outboundBytesPerSecond()) + " Mbps; server="
+                + (snapshot.serverBytesPerSecond() < 0 ? "unavailable" : mbps(snapshot.serverBytesPerSecond()) + " Mbps")
+                + "; admission=" + (snapshot.admissionBlocked() ? "blocked" : "open")), false);
+        context.getSource().sendSuccess(() -> Component.literal("Muted players (" + snapshot.mutedPlayers().size() + "): "
+                + snapshot.mutedPlayers().stream().map(uuid -> { ServerPlayer p = server.getServer().getPlayerList().getPlayer(uuid); return p == null ? uuid.toString() : p.getName().getString(); }).limit(20).toList()), false);
+        return 1;
+    }
+
+    private static String mbps(long bytesPerSecond) { return String.format(java.util.Locale.ROOT, "%.2f", bytesPerSecond * 8D / 1_000_000D); }
+
+    private static int mute(CommandContext<CommandSourceStack> context) {
+        return setMute(context, true);
+    }
+
+    private static int unmute(CommandContext<CommandSourceStack> context) {
+        return setMute(context, false);
+    }
+
+    private static int setMute(CommandContext<CommandSourceStack> context, boolean mute) {
+        Server server = Voicechat.SERVER.getServer();
+        if (server == null) { context.getSource().sendFailure(Component.translatable("message.voicechat.voice_chat_unavailable")); return 0; }
+        ServerPlayer target;
+        try { target = EntityArgument.getPlayer(context, "target"); }
+        catch (CommandSyntaxException e) { context.getSource().sendFailure(Component.literal(e.getMessage())); return 0; }
+        try {
+            if (mute) server.getProtectionManager().mute(target.getUUID()); else server.getProtectionManager().unmute(target.getUUID());
+            context.getSource().sendSuccess(() -> Component.literal((mute ? "Muted " : "Unmuted ") + target.getName().getString() + " for voice chat."), true);
+            return 1;
+        } catch (Exception e) {
+            context.getSource().sendFailure(Component.literal("Could not update voice mute: " + e.getMessage()));
+            return 0;
+        }
+    }
+
+    private static int report(CommandContext<CommandSourceStack> context) {
+        Server server = Voicechat.SERVER.getServer();
+        if (server == null) { context.getSource().sendFailure(Component.translatable("message.voicechat.voice_chat_unavailable")); return 0; }
+        ServerPlayer reporter;
+        try { reporter = context.getSource().getPlayerOrException(); }
+        catch (CommandSyntaxException e) { context.getSource().sendFailure(Component.literal("Only a player can report voice chat.")); return 0; }
+        ServerPlayer target;
+        try { target = EntityArgument.getPlayer(context, "target"); }
+        catch (CommandSyntaxException e) { context.getSource().sendFailure(Component.literal(e.getMessage())); return 0; }
+        String reason = context.getNodes().stream().anyMatch(node -> node.getNode().getName().equals("reason"))
+                ? StringArgumentType.getString(context, "reason") : "player_report";
+        if (!server.getModerationCache().report(target.getUUID(), reporter.getUUID(), reason)) {
+            context.getSource().sendFailure(Component.literal("No recent cached voice audio is available, or voice moderation caching is disabled."));
+            return 0;
+        }
+        context.getSource().sendSuccess(() -> Component.literal("Voice report queued for " + target.getName().getString() + "."), false);
+        return 1;
     }
 
 }
