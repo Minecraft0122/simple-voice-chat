@@ -6,12 +6,16 @@ import de.maxhenkel.voicechat.voice.transport.TcpConnection;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.net.DatagramPacket;
+import java.net.DatagramSocket;
 import java.net.Socket;
 import java.net.SocketAddress;
+import java.util.Arrays;
 
 public class ClientVoicechatSocketImpl implements ClientVoicechatSocket {
 
     private static final int CONNECT_TIMEOUT_MILLIS = 5000;
+    private static final int MAX_DATAGRAM_SIZE = 4096;
 
     private final Object stateLock = new Object();
     private volatile TcpConnection connection;
@@ -19,6 +23,16 @@ public class ClientVoicechatSocketImpl implements ClientVoicechatSocket {
     private boolean opened;
     private volatile boolean closed = true;
     private boolean connecting;
+    private int protocolVersion = 1021;
+    private DatagramSocket datagramSocket;
+
+    @Override
+    public void setTransport(int protocolVersion) {
+        synchronized (stateLock) {
+            if (opened) throw new IllegalStateException("Transport must be selected before opening the socket");
+            this.protocolVersion = protocolVersion;
+        }
+    }
 
     @Override
     public void open() throws Exception {
@@ -29,11 +43,18 @@ public class ClientVoicechatSocketImpl implements ClientVoicechatSocket {
             opened = true;
             closed = false;
             connection = null;
+            if (protocolVersion == 20) datagramSocket = new DatagramSocket();
         }
     }
 
     @Override
     public RawUdpPacket read() throws Exception {
+        if (protocolVersion == 20) {
+            byte[] buffer = new byte[MAX_DATAGRAM_SIZE];
+            DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
+            datagramSocket.receive(packet);
+            return new RawUdpPacketImpl(Arrays.copyOf(packet.getData(), packet.getLength()), packet.getSocketAddress(), System.currentTimeMillis());
+        }
         TcpConnection current;
         synchronized (stateLock) {
             while (opened && !closed && connection == null) {
@@ -61,6 +82,12 @@ public class ClientVoicechatSocketImpl implements ClientVoicechatSocket {
     public void send(byte[] data, SocketAddress address) throws Exception {
         if (data == null) {
             throw new NullPointerException("data");
+        }
+        if (protocolVersion == 20) {
+            if (!(address instanceof InetSocketAddress inetAddress)) throw new IOException("UDP voice chat requires an internet socket address");
+            if (data.length > MAX_DATAGRAM_SIZE) throw new IOException("UDP voice packet is too large");
+            datagramSocket.send(new DatagramPacket(data, data.length, inetAddress));
+            return;
         }
         try {
             getOrConnect(address).send(data);
@@ -137,6 +164,8 @@ public class ClientVoicechatSocketImpl implements ClientVoicechatSocket {
             pending = connectingSocket;
             stateLock.notifyAll();
         }
+        DatagramSocket udp = datagramSocket;
+        if (udp != null) udp.close();
         if (pending != null) {
             try {
                 pending.close();
@@ -151,6 +180,6 @@ public class ClientVoicechatSocketImpl implements ClientVoicechatSocket {
     @Override
     public boolean isClosed() {
         TcpConnection current = connection;
-        return closed || (current != null && current.isClosed());
+        return closed || (protocolVersion == 20 ? datagramSocket == null || datagramSocket.isClosed() : current != null && current.isClosed());
     }
 }

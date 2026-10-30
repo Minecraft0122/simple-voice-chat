@@ -8,6 +8,10 @@ import java.net.SocketAddress;
  */
 public interface ClientVoicechatSocket {
 
+    /** Selects the negotiated wire protocol before {@link #open()}. */
+    default void setTransport(int protocolVersion) {
+    }
+
     void open() throws Exception;
 
     RawUdpPacket read() throws Exception;
