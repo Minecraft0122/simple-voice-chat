@@ -122,7 +122,7 @@ public class ClientManager {
         Voicechat.LOGGER.info("Sending secret request to the server");
         client = new ClientVoicechat();
         ClientVoicechat joined = client;
-        ClientServerNetManager.sendToServer(new RequestSecretPacket(Voicechat.COMPATIBILITY_VERSION));
+        ClientServerNetManager.sendToServer(new RequestSecretPacket(Voicechat.COMPATIBILITY_VERSION, 1 | 2, "tcp,udp"));
         Thread.ofVirtual().name("voicechat-backend-check").start(() -> {
             try { Thread.sleep(5000L); } catch (InterruptedException e) { return; }
             minecraft.execute(() -> {
