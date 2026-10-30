@@ -53,6 +53,7 @@ public class ClientVoicechatConnection extends Thread {
         setDaemon(true);
         setName("VoiceChatConnectionThread");
         setUncaughtExceptionHandler(new VoicechatUncaughtExceptionHandler());
+        this.socket.setTransport(data.getTransportProtocol());
         this.socket.open();
     }
 
