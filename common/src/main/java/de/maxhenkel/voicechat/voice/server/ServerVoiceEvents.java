@@ -48,12 +48,15 @@ public class ServerVoiceEvents {
         });
         CommonCompatibilityManager.INSTANCE.getNetManager().requestSecretChannel.setServerListener((player, packet) -> {
             Voicechat.LOGGER.info("Received secret request of {} ({})", player.getName().getString(), packet.getCompatibilityVersion());
-            Integer previous = clientCompatibilities.putIfAbsent(player.getUUID(), packet.getCompatibilityVersion());
-            if (previous != null && previous != packet.getCompatibilityVersion()) return;
-            if (!supportsVersion(packet.getCompatibilityVersion())) {
+            VoiceProtocol selected = VoiceProtocol.fromVersion(packet.getCompatibilityVersion()) == null ? null
+                    : TransportMode.parse(Voicechat.SERVER_CONFIG.transportMode.get())
+                    .select(Voicechat.SERVER_CONFIG.transportPreference.get(), packet.getTransportCapabilities());
+            if (selected == null) {
                 Voicechat.LOGGER.warn("Connected client {} has incompatible voice chat version (server={}, client={})", player.getName().getString(), Voicechat.COMPATIBILITY_VERSION, packet.getCompatibilityVersion());
                 player.sendSystemMessage(getIncompatibleMessage(packet.getCompatibilityVersion()));
             } else {
+                Integer previous = clientCompatibilities.putIfAbsent(player.getUUID(), selected.version());
+                if (previous != null && previous != selected.version()) return;
                 initializePlayerConnection(player);
             }
         });
@@ -130,7 +133,8 @@ public class ServerVoiceEvents {
         }
 
         int advertisedPort = Voicechat.SERVER_CONFIG.isProxyMode() ? -1 : server.getPort();
-        NetManager.sendToClient(player, new SecretPacket(player, secret, advertisedPort, Voicechat.SERVER_CONFIG, voiceHost));
+        NetManager.sendToClient(player, new SecretPacket(player, secret, advertisedPort, Voicechat.SERVER_CONFIG, voiceHost,
+                getProtocol(player.getUUID()).version()));
 
         Voicechat.LOGGER.info("Sent secret to {}", player.getName().getString());
     }

@@ -7,6 +7,7 @@ import de.maxhenkel.voicechat.BuildConstants;
 public class ProxyConfig {
 
     public ConfigEntry<String> transportMode;
+    public ConfigEntry<String> transportPreference;
     public ConfigEntry<Integer> port;
     public ConfigEntry<String> bindAddress;
     public ConfigEntry<String> voiceHost;
@@ -21,6 +22,10 @@ public class ProxyConfig {
                 "Set the same mode on every backend. Dual binds both protocols to the configured port.",
                 "代理和后端的 transport_mode 必须一致；dual 必须同时放行防火墙/容器的 TCP 和 UDP。");
         de.maxhenkel.voicechat.voice.transport.TransportMode.parse(transportMode.get());
+        transportPreference = builder.stringEntry("transport_preference", "tcp,udp",
+                "[Network / \u7f51\u7edc] Client transport preference, in order: tcp,udp or udp,tcp.",
+                "\u5ba2\u6237\u7aef\u4f20\u8f93\u4f18\u5148\u987a\u5e8f\uff0c\u53ef\u586b tcp,udp \u6216 udp,tcp\u3002\u53ea\u4f1a\u9009\u62e9\u53cc\u65b9\u90fd\u652f\u6301\u7684\u534f\u8bae\u3002",
+                "This only affects negotiation; transport_mode still controls which listeners are enabled.");
         port = builder
                 .integerEntry("port", 24454, 0, 65535,
                         "The voice port (default 24454). This proxy owns the public voice listener.",

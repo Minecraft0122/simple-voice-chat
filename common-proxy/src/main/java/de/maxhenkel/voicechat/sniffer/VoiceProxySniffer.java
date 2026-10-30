@@ -36,10 +36,18 @@ public class VoiceProxySniffer {
     public synchronized ByteBuffer onPluginMessage(String channel, boolean fromServer, ByteBuffer message, UUID player) throws IncompatibleVoiceChatException {
         if (!fromServer && VoiceProxy.isPrivateChannel(channel)) return ByteBuffer.allocate(0);
         if (!fromServer && channel.equals(VoiceProxy.REQUEST_SECRET_CHANNEL)) {
-            if (message.remaining() != 4) throw new IncompatibleVoiceChatException("Invalid secret request");
+            if (message.remaining() < 4) throw new IncompatibleVoiceChatException("Invalid secret request");
             int version = message.getInt();
-            Integer previous = compatibilityVersionMap.putIfAbsent(player, version);
-            if (previous != null && previous != version) return ByteBuffer.allocate(0);
+            int capabilities = VoiceProtocol.fromVersion(version) == VoiceProtocol.LEGACY_UDP ? 1 : 2;
+            if (message.hasRemaining()) {
+                capabilities = message.get() & 255;
+                readUtf(message, 32);
+            }
+            VoiceProtocol selected = TransportMode.parse(voiceProxy.getConfig().transportMode.get())
+                    .select(voiceProxy.getConfig().transportPreference.get(), capabilities);
+            if (selected == null) throw new IncompatibleVoiceChatException("No mutually supported voice transport");
+            Integer previous = compatibilityVersionMap.putIfAbsent(player, selected.version());
+            if (previous != null && previous != selected.version()) return ByteBuffer.allocate(0);
             requestedAt.put(player, System.currentTimeMillis());
             voiceProxy.availability(player, VoiceAvailability.WAITING);
             return null;
@@ -71,6 +79,7 @@ public class VoiceProxySniffer {
             throw new IncompatibleVoiceChatException("Supported voice client and enabled transport required");
         }
         SniffedSecretPacket packet = SniffedSecretPacket.fromBytes(message, version);
+        packet.setTransportProtocol(version);
         if (packet.getServerPort() != -1) {
             internalError(player, "Backend must enable proxy_mode=true");
             throw new IncompatibleVoiceChatException("Backend is not in central proxy mode");
@@ -196,5 +205,21 @@ public class VoiceProxySniffer {
         List<UUID> result = new ArrayList<>(count);
         for (int i = 0; i < count; i++) result.add(readUUID(b));
         return List.copyOf(result);
+    }
+    private static String readUtf(ByteBuffer b, int maxChars) {
+        int length = 0, shift = 0;
+        while (true) {
+            if (!b.hasRemaining() || shift >= 35) throw new IllegalArgumentException("Invalid transport preference");
+            int n = b.get() & 255;
+            length |= (n & 127) << shift;
+            if ((n & 128) == 0) break;
+            shift += 7;
+        }
+        if (length < 0 || length > maxChars * 4 || length > b.remaining()) throw new IllegalArgumentException("Invalid transport preference");
+        byte[] bytes = new byte[length];
+        b.get(bytes);
+        String value = new String(bytes, java.nio.charset.StandardCharsets.UTF_8);
+        if (value.length() > maxChars) throw new IllegalArgumentException("Invalid transport preference");
+        return value;
     }
 }

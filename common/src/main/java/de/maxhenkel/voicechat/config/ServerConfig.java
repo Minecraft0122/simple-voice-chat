@@ -11,6 +11,7 @@ import de.maxhenkel.voicechat.voice.common.AudioUtils;
 public class ServerConfig {
 
     public ConfigEntry<String> transportMode;
+    public ConfigEntry<String> transportPreference;
 
     public ConfigEntry<Integer> voiceChatPort;
     public ConfigEntry<String> voiceChatBindAddress;
@@ -54,6 +55,9 @@ public class ServerConfig {
                 "Dual binds TCP and UDP on the same address and port; forward BOTH in firewalls and containers.",
                 "dual 必须同时放行 TCP/UDP；服务端兼容两种客户端，不会改变客户端使用的协议。");
         de.maxhenkel.voicechat.voice.transport.TransportMode.parse(transportMode.get());
+        transportPreference = builder.stringEntry("transport_preference", "tcp,udp",
+                "Protocol preference for dual-capable clients. Supported values: tcp,udp or udp,tcp.",
+                "双协议客户端优先使用的协议；可选 tcp,udp 或 udp,tcp。只控制首选顺序，不会禁用 transport_mode 中的协议。");
 
         voiceChatPort = builder
                 .integerEntry("port", 24454, -1, 65535,
@@ -153,9 +157,9 @@ public class ServerConfig {
         voiceTalkerLeaseSeconds = builder.integerEntry("voice_talker_lease_seconds", 3, 1, 30,
                 "How long an active talker keeps admission after their last audio frame.",
                 "玩家最后一个音频包之后保留说话者准入的秒数。");
-        voiceModerationCacheEnabled = builder.booleanEntry("voice_moderation_cache_enabled", false,
-                "Cache Opus microphone frames for an external moderation program. Disabled by default.",
-                "是否将 Opus 语音片段缓存到磁盘供外部审核程序检查；默认关闭，请先告知玩家并配置本机审核程序。");
+        voiceModerationCacheEnabled = builder.booleanEntry("voice_moderation_cache_enabled", true,
+                "Cache plaintext Opus microphone frames for an external moderation program. Enabled by default in this build; files are unencrypted.",
+                "是否将已解密的 Opus 语音片段以明文写入磁盘供外部审核；本版默认开启，文件不加密。如需停止保存请设为 false。");
         voiceModerationCacheHours = builder.integerEntry("voice_moderation_cache_hours", 12, 1, 168,
                 "Delete cached voice segments after this many hours.",
                 "语音片段在磁盘上保留的小时数，到期自动删除；默认 12 小时。");
