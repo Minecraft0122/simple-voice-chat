@@ -69,8 +69,12 @@ jobs:
             done
           fi
           if [ ${#tasks[@]} -eq 0 ] && [ ! -d quilt ]; then
-            echo "No modules matched release_kind=${{ inputs.release_kind }}" >&2
-            exit 1
+            if [ "${{ inputs.release_kind }}" = server ] && [ "${{ inputs.target_ref }}" = "tcp/1.21.4" ]; then
+              echo "No server module exists in the upstream 1.21.4 line; publishing an explicit status release."
+            else
+              echo "No modules matched release_kind=${{ inputs.release_kind }}" >&2
+              exit 1
+            fi
           fi
           if [ ${#tasks[@]} -gt 0 ]; then ./gradlew "${tasks[@]}" --console=plain; fi
 
@@ -97,7 +101,19 @@ jobs:
               done < <(find "$root/build/libs" -maxdepth 1 -type f -name '*.jar' | sort)
             fi
           done
-          if [ "$found" -eq 0 ]; then echo "No release jars found" >&2; exit 1; fi
+          if [ "$found" -eq 0 ]; then
+            if [ "${{ inputs.release_kind }}" = server ] && [ "${{ inputs.target_ref }}" = "tcp/1.21.4" ]; then
+              cat > dist/SERVER-PACKAGE-STATUS.txt <<'EOF'
+This release is intentionally a status-only server release.
+The upstream Minecraft 1.21.4 line contains no Paper, Bukkit, Velocity, or BungeeCord server module.
+Use the matching server release for a supported server line; do not install this file as a server plugin.
+EOF
+              found=1
+            else
+              echo "No release jars found" >&2
+              exit 1
+            fi
+          fi
           sha256sum dist/* > dist/SHA256SUMS.txt
           printf 'Release ref: %s\nPackage family: %s\n\nThe client release contains only client mod jars. The server release contains only server/proxy jars.\n' "${{ inputs.target_ref }}" "${{ inputs.release_kind }}" > dist/RELEASE-INFO.txt
 
