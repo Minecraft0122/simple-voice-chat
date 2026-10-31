@@ -20,23 +20,19 @@ public class SniffedSecretPacket {
     protected boolean groupsEnabled;
     protected String voiceHost;
     protected boolean allowRecording;
+    protected int transportProtocol = 1021;
 
     protected SniffedSecretPacket() {
 
     }
 
     public static SniffedSecretPacket fromBytes(ByteBuffer buffer, int compatibilityVersion) throws IncompatibleVoiceChatException {
-        if (compatibilityVersion < 10) {
-            throw new IncompatibleVoiceChatException(String.format("Client has an outdated voice chat compatibility version (%s)", compatibilityVersion));
-        }
-        if (compatibilityVersion == 19) {
-            throw new IncompatibleVoiceChatException(String.format("Client has an unsupported voice chat compatibility version (%s)", compatibilityVersion));
-        }
-        if (compatibilityVersion > VoiceProxy.COMPATIBILITY_VERSION) {
-            throw new IncompatibleVoiceChatException(String.format("Client has a newer voice chat compatibility version (%s)", compatibilityVersion));
+        if (de.maxhenkel.voicechat.voice.transport.VoiceProtocol.fromVersion(compatibilityVersion) == null) {
+            throw new IncompatibleVoiceChatException("Unsupported voice protocol " + compatibilityVersion);
         }
         ByteBufferWrapper buf = new ByteBufferWrapper(buffer);
         SniffedSecretPacket packet = new SniffedSecretPacket();
+        packet.compatibilityVersion = compatibilityVersion;
 
         packet.secret = new byte[16];
         buf.readBytes(packet.secret);
@@ -49,12 +45,13 @@ public class SniffedSecretPacket {
         packet.groupsEnabled = buf.readBoolean();
         packet.voiceHost = buf.readUtf(32767);
         packet.allowRecording = buf.readBoolean();
+        if (buf.getBuffer().remaining() >= 4) packet.transportProtocol = buf.readInt();
         return packet;
     }
 
     public ByteBuffer toBytes() {
         int maxHostSize = voiceHost.length() * 4 + 5;
-        int size = secret.length + 4 + 16 + 1 + 4 + 8 + 4 + 1 + maxHostSize + 1;
+        int size = secret.length + 4 + 16 + 1 + 4 + 8 + 4 + 1 + maxHostSize + 1 + 4;
         ByteBuffer buffer = ByteBuffer.allocate(size);
         ByteBufferWrapper buf = new ByteBufferWrapper(buffer);
         buf.writeBytes(secret);
@@ -67,6 +64,7 @@ public class SniffedSecretPacket {
         buf.writeBoolean(groupsEnabled);
         buf.writeUtf(voiceHost, 32767);
         buf.writeBoolean(allowRecording);
+        buf.writeInt(transportProtocol);
 
         return ByteBuffer.wrap(buf.toBytes());
     }
@@ -77,6 +75,14 @@ public class SniffedSecretPacket {
 
     public int getServerPort() {
         return serverPort;
+    }
+
+    public byte[] getSecret() {
+        return secret.clone();
+    }
+
+    public void setTransportProtocol(int transportProtocol) {
+        this.transportProtocol = transportProtocol;
     }
 
     public UUID getPlayerUUID() {
