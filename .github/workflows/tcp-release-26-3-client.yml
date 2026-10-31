@@ -1,0 +1,41 @@
+name: Publish TCP 26.3 client release
+
+on:
+  push:
+    branches:
+      - tcp/26.3
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    if: github.event.head_commit.message != 'Publish TCP 26.3 client release'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 25
+      - uses: gradle/actions/setup-gradle@v6
+      - name: Build client modules
+        shell: bash
+        run: ./gradlew :fabric:build :neoforge:build --console=plain
+      - name: Collect assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf dist
+          mkdir -p dist
+          for root in fabric neoforge; do
+            find "$root/build/libs" -maxdepth 1 -type f -name '*.jar' ! -name '*-sources.jar' ! -name '*-javadoc.jar' ! -name '*-dev.jar' -exec cp {} dist/ \;
+          done
+          printf 'Release ref: tcp/26.3\nPackage family: client\n\nNegotiated UDP and TCP client transport.\n' > dist/RELEASE-INFO.txt
+          sha256sum dist/*.jar dist/RELEASE-INFO.txt > dist/SHA256SUMS.txt
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: gh release create v2.6.24-tcp.3.1-client-26.3 dist/* --repo "$GITHUB_REPOSITORY" --title 'TCP Voice Chat Client 26.3' --notes 'Client-only TCP voice release for Minecraft 26.3. Supports negotiated UDP and TCP transport.'
