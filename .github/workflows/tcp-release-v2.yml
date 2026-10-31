@@ -1,0 +1,128 @@
+name: Publish split TCP voice releases v2
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_ref:
+        description: Git ref containing the version to build
+        required: true
+        type: string
+      release_kind:
+        description: Publish client or server packages
+        required: true
+        type: choice
+        options:
+          - client
+          - server
+      release_tag:
+        description: New GitHub release tag
+        required: true
+        type: string
+      release_title:
+        description: GitHub release title
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out requested version
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.target_ref }}
+
+      - name: Select Java for the Minecraft line
+        shell: bash
+        run: |
+          version=$(sed -n 's/^java_version=//p' gradle.properties)
+          if [ -z "$version" ]; then version=21; fi
+          echo "JAVA_VERSION=$version" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - uses: gradle/actions/setup-gradle@v6
+
+      - name: Build selected package family
+        shell: bash
+        run: |
+          set -euo pipefail
+          modules=$(sed -n 's/^include(\(.*\))/\1/p' settings.gradle | tr -d "'" | tr ',' ' ' || true)
+          tasks=()
+          if [ "${{ inputs.release_kind }}" = client ]; then
+            for module in fabric neoforge forge; do
+              if printf '%s\n' "$modules" | grep -qw "$module"; then tasks+=(":$module:build"); fi
+            done
+            if [ -d quilt ] && [ -f quilt/build.gradle ]; then
+              (cd quilt && ../gradlew build --console=plain)
+            fi
+          else
+            for module in paper bukkit velocity bungeecord; do
+              if printf '%s\n' "$modules" | grep -qw "$module"; then tasks+=(":$module:build"); fi
+            done
+          fi
+          if [ ${#tasks[@]} -eq 0 ] && [ ! -d quilt ]; then
+            if [ "${{ inputs.release_kind }}" = server ] && [ "${{ inputs.target_ref }}" = "tcp/1.21.4" ]; then
+              echo "No server module exists in the upstream 1.21.4 line; publishing an explicit status release."
+            else
+              echo "No modules matched release_kind=${{ inputs.release_kind }}" >&2
+              exit 1
+            fi
+          fi
+          if [ ${#tasks[@]} -gt 0 ]; then ./gradlew "${tasks[@]}" --console=plain; fi
+
+      - name: Collect release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf dist
+          mkdir -p dist
+          if [ "${{ inputs.release_kind }}" = client ]; then
+            roots=(fabric neoforge forge quilt)
+          else
+            roots=(paper bukkit velocity bungeecord)
+          fi
+          found=0
+          for root in "${roots[@]}"; do
+            if [ -d "$root/build/libs" ]; then
+              while IFS= read -r jar; do
+                case "$jar" in
+                  *-sources.jar|*-javadoc.jar|*-dev.jar) continue ;;
+                esac
+                cp "$jar" dist/
+                found=$((found + 1))
+              done < <(find "$root/build/libs" -maxdepth 1 -type f -name '*.jar' | sort)
+            fi
+          done
+          if [ "$found" -eq 0 ]; then
+            if [ "${{ inputs.release_kind }}" = server ] && [ "${{ inputs.target_ref }}" = "tcp/1.21.4" ]; then
+              cat > dist/SERVER-PACKAGE-STATUS.txt <<'EOF'
+This release is intentionally a status-only server release.
+The upstream Minecraft 1.21.4 line contains no Paper, Bukkit, Velocity, or BungeeCord server module.
+Use the matching server release for a supported server line; do not install this file as a server plugin.
+EOF
+              found=1
+            else
+              echo "No release jars found" >&2
+              exit 1
+            fi
+          fi
+          sha256sum dist/* > dist/SHA256SUMS.txt
+          printf 'Release ref: %s\nPackage family: %s\n\nThe client release contains only client mod jars. The server release contains only server/proxy jars.\n' "${{ inputs.target_ref }}" "${{ inputs.release_kind }}" > dist/RELEASE-INFO.txt
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh release create "${{ inputs.release_tag }}" dist/* \
+            --repo "${{ github.repository }}" \
+            --title "${{ inputs.release_title }}" \
+            --notes "TCP voice client/server split release.\n\n- Target ref: ${{ inputs.target_ref }}\n- Package family: ${{ inputs.release_kind }}\n- Client transport: negotiated UDP and TCP\n- Server cache: decrypted Opus frames are stored as unencrypted files when enabled (default in this fork); retention is configurable."
