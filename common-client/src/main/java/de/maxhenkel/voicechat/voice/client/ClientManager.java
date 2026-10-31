@@ -68,12 +68,6 @@ public class ClientManager {
         });
 
         ClientServerNetManager.setClientListener(CommonCompatibilityManager.INSTANCE.getNetManager().secretChannel, (player, packet) -> authenticate(packet));
-        ClientServerNetManager.setClientListener(CommonCompatibilityManager.INSTANCE.getNetManager().voiceAvailabilityChannel, (player, packet) -> {
-            if (client != null) {
-                if (packet.getStatus() == de.maxhenkel.voicechat.voice.transport.VoiceAvailability.WAITING) client.resetBackend();
-                client.setAvailability(packet.getStatus());
-            }
-        });
     }
 
     private void authenticate(SecretPacket secretPacket) {
@@ -173,7 +167,7 @@ public class ClientManager {
         Voicechat.LOGGER.info("LAN voice chat uses TCP port {} (Minecraft port {})", server.getPort(), port);
         Component portComponent = ComponentUtils.copyOnClickText(String.valueOf(server.getPort()));
         Minecraft mc = Minecraft.getInstance();
-        mc.execute(() -> mc.gui.hud.getChat().addClientSystemMessage(Component.translatable("message.voicechat.server_port", portComponent)));
+        mc.execute(() -> mc.gui.getChat().addMessage(Component.translatable("message.voicechat.server_port", portComponent)));
     }
 
     @Nullable

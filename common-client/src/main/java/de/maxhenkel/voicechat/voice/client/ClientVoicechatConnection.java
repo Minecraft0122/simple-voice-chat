@@ -101,6 +101,7 @@ public class ClientVoicechatConnection extends Thread {
                     if (authenticated && !connected) {
                         Voicechat.LOGGER.info("Server acknowledged connection check");
                         connected = true;
+                        client.setAvailability(de.maxhenkel.voicechat.voice.transport.VoiceAvailability.AVAILABLE);
                         ClientCompatibilityManager.INSTANCE.emitVoiceChatConnectedEvent(this);
                         lastKeepAlive = System.currentTimeMillis();
                     }

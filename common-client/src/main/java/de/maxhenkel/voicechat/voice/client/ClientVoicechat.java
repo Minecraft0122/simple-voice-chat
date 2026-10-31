@@ -6,6 +6,7 @@ import de.maxhenkel.voicechat.debug.CooldownTimer;
 import de.maxhenkel.voicechat.gui.onboarding.OnboardingManager;
 import de.maxhenkel.voicechat.natives.ClientNativeManager;
 import de.maxhenkel.voicechat.plugins.ClientPluginManager;
+import de.maxhenkel.voicechat.intercompatibility.ClientCompatibilityManager;
 import de.maxhenkel.voicechat.voice.client.speaker.SpeakerException;
 import de.maxhenkel.voicechat.voice.common.NamedThreadPoolFactory;
 import de.maxhenkel.voicechat.voice.common.SoundPacket;
@@ -39,6 +40,37 @@ public class ClientVoicechat {
     @Nullable
     private AudioRecorder recorder;
     private final long startTime;
+    private volatile int availability = de.maxhenkel.voicechat.voice.transport.VoiceAvailability.WAITING;
+
+    public int getAvailability() { return availability; }
+
+    public boolean canSendAudio() {
+        return availability == de.maxhenkel.voicechat.voice.transport.VoiceAvailability.AVAILABLE;
+    }
+
+    public void resetBackend() {
+        onVoiceChatDisconnected();
+        initializationData = null;
+        setAvailability(de.maxhenkel.voicechat.voice.transport.VoiceAvailability.WAITING);
+        ClientCompatibilityManager.INSTANCE.emitVoiceChatDisconnectedEvent();
+    }
+
+    public void setAvailability(int status) {
+        int previous = availability;
+        availability = status;
+        if (!canSendAudio()) closeMicThread();
+        if (status == de.maxhenkel.voicechat.voice.transport.VoiceAvailability.UNAVAILABLE
+                || status == de.maxhenkel.voicechat.voice.transport.VoiceAvailability.INTERNAL_ERROR) {
+            onVoiceChatDisconnected();
+            initializationData = null;
+            ClientCompatibilityManager.INSTANCE.emitVoiceChatDisconnectedEvent();
+        } else if (canSendAudio() && connection != null && connection.isInitialized() && micThread == null) {
+            startMicThread(connection);
+        }
+        if (previous != status && status != de.maxhenkel.voicechat.voice.transport.VoiceAvailability.WAITING) {
+            ChatUtils.sendModMessage(Component.translatable(de.maxhenkel.voicechat.voice.transport.VoiceAvailability.translationKey(status)));
+        }
+    }
 
     public ClientVoicechat() {
         this.startTime = System.currentTimeMillis();
@@ -67,6 +99,20 @@ public class ClientVoicechat {
         connection.start();
         OnboardingManager.onConnecting();
         ClientNativeManager.onConnecting();
+    }
+
+    void scheduleReconnect(ClientVoicechatConnection failed) {
+        if (connection != failed || initializationData == null) return;
+        InitializationData retryData = initializationData;
+        connection = null;
+        new Thread(() -> {
+            try {
+                Thread.sleep(1000L);
+                if (initializationData == retryData) connect(retryData);
+            } catch (Exception e) {
+                Voicechat.LOGGER.debug("Voice chat reconnect failed", e);
+            }
+        }, "VoiceChatReconnectThread").start();
     }
 
     public void processSoundPacket(SoundPacket packet) {
