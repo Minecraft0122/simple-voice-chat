@@ -58,14 +58,14 @@ jobs:
           tasks=()
           if [ "${{ inputs.release_kind }}" = client ]; then
             for module in fabric neoforge forge; do
-              if grep -q "'$module'" settings.gradle; then tasks+=(":$module:build"); fi
+              if printf '%s\n' "$modules" | grep -qw "$module"; then tasks+=(":$module:build"); fi
             done
             if [ -d quilt ] && [ -f quilt/build.gradle ]; then
               (cd quilt && ../gradlew build --console=plain)
             fi
           else
             for module in paper bukkit velocity bungeecord; do
-              if grep -q "'$module'" settings.gradle; then tasks+=(":$module:build"); fi
+              if printf '%s\n' "$modules" | grep -qw "$module"; then tasks+=(":$module:build"); fi
             done
           fi
           if [ ${#tasks[@]} -eq 0 ] && [ ! -d quilt ]; then

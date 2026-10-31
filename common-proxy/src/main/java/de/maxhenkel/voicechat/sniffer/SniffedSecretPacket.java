@@ -45,7 +45,7 @@ public class SniffedSecretPacket {
         packet.groupsEnabled = buf.readBoolean();
         packet.voiceHost = buf.readUtf(32767);
         packet.allowRecording = buf.readBoolean();
-        if (buf.remaining() >= 4) packet.transportProtocol = buf.readInt();
+        if (buf.getBuffer().remaining() >= 4) packet.transportProtocol = buf.readInt();
         return packet;
     }
 
