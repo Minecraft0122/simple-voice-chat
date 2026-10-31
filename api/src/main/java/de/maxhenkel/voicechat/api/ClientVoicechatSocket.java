@@ -8,15 +8,12 @@ import java.net.SocketAddress;
  */
 public interface ClientVoicechatSocket {
 
+    /** Selects the negotiated wire protocol before {@link #open()}. */
+    default void setTransport(int protocolVersion) {
+    }
+
     void open() throws Exception;
 
-    /**
-     * Blocks until a packet is received.
-     *
-     * @return the received packet
-     * @throws java.net.ProtocolException if the received packet is invalid and should be skipped
-     * @throws Exception                  if the socket can't be read from - This disconnects the client
-     */
     RawUdpPacket read() throws Exception;
 
     void send(byte[] data, SocketAddress address) throws Exception;

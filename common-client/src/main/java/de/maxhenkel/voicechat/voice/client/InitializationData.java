@@ -20,6 +20,7 @@ public class InitializationData {
     private final int keepAlive;
     private final boolean groupsEnabled;
     private final boolean allowRecording;
+    private final int transportProtocol;
 
     public InitializationData(String serverIP, SecretPacket secretPacket) {
         HostData hostData = parseAddress(secretPacket.getVoiceHost(), serverIP, secretPacket.getServerPort());
@@ -33,6 +34,7 @@ public class InitializationData {
         this.keepAlive = secretPacket.getKeepAlive();
         this.groupsEnabled = secretPacket.groupsEnabled();
         this.allowRecording = secretPacket.allowRecording();
+        this.transportProtocol = secretPacket.getTransportProtocol();
     }
 
     private static HostData parseAddress(String voiceHost, String serverIP, int serverPort) {
@@ -107,6 +109,10 @@ public class InitializationData {
 
     public boolean allowRecording() {
         return allowRecording;
+    }
+
+    public int getTransportProtocol() {
+        return transportProtocol;
     }
 
     private static class HostData {

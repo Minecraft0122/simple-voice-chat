@@ -5,14 +5,14 @@ import de.maxhenkel.voicechat.config.ServerConfig;
 import de.maxhenkel.voicechat.voice.common.Secret;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerPlayer;
 
 import java.util.UUID;
 
 public class SecretPacket implements Packet<SecretPacket> {
 
-    public static final CustomPacketPayload.Type<SecretPacket> SECRET = new CustomPacketPayload.Type<>(ResourceLocation.fromNamespaceAndPath(Voicechat.MODID, "secret"));
+    public static final CustomPacketPayload.Type<SecretPacket> SECRET = new CustomPacketPayload.Type<>(Identifier.fromNamespaceAndPath(Voicechat.MODID, "secret"));
 
     private Secret secret;
     private int serverPort;
@@ -24,12 +24,17 @@ public class SecretPacket implements Packet<SecretPacket> {
     private boolean groupsEnabled;
     private String voiceHost;
     private boolean allowRecording;
+    private int transportProtocol = 1021;
 
     public SecretPacket() {
 
     }
 
     public SecretPacket(ServerPlayer player, Secret secret, int port, ServerConfig serverConfig, String voiceHost) {
+        this(player, secret, port, serverConfig, voiceHost, 1021);
+    }
+
+    public SecretPacket(ServerPlayer player, Secret secret, int port, ServerConfig serverConfig, String voiceHost, int transportProtocol) {
         this.secret = secret;
         this.serverPort = port;
         this.playerUUID = player.getUUID();
@@ -40,6 +45,7 @@ public class SecretPacket implements Packet<SecretPacket> {
         this.groupsEnabled = serverConfig.groupsEnabled.get();
         this.voiceHost = voiceHost;
         this.allowRecording = serverConfig.allowRecording.get();
+        this.transportProtocol = transportProtocol;
     }
 
     public Secret getSecret() {
@@ -82,6 +88,8 @@ public class SecretPacket implements Packet<SecretPacket> {
         return allowRecording;
     }
 
+    public int getTransportProtocol() { return transportProtocol; }
+
     @Override
     public SecretPacket fromBytes(FriendlyByteBuf buf) {
         secret = Secret.fromBytes(buf);
@@ -94,6 +102,7 @@ public class SecretPacket implements Packet<SecretPacket> {
         groupsEnabled = buf.readBoolean();
         voiceHost = buf.readUtf(32767);
         allowRecording = buf.readBoolean();
+        if (buf.isReadable()) transportProtocol = buf.readInt();
         return this;
     }
 
@@ -109,6 +118,7 @@ public class SecretPacket implements Packet<SecretPacket> {
         buf.writeBoolean(groupsEnabled);
         buf.writeUtf(voiceHost);
         buf.writeBoolean(allowRecording);
+        buf.writeInt(transportProtocol);
     }
 
     @Override

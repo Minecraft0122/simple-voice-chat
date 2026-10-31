@@ -122,7 +122,7 @@ public class ClientManager {
         Voicechat.LOGGER.info("Sending secret request to the server");
         client = new ClientVoicechat();
         ClientVoicechat joined = client;
-        ClientServerNetManager.sendToServer(new RequestSecretPacket(Voicechat.COMPATIBILITY_VERSION));
+        ClientServerNetManager.sendToServer(new RequestSecretPacket(Voicechat.COMPATIBILITY_VERSION, 1 | 2, "tcp,udp"));
         Thread.ofVirtual().name("voicechat-backend-check").start(() -> {
             try { Thread.sleep(5000L); } catch (InterruptedException e) { return; }
             minecraft.execute(() -> {
@@ -168,24 +168,12 @@ public class ClientManager {
         if (server == null) {
             return;
         }
-        try {
-            Voicechat.LOGGER.info("Changing voice chat port to {}", port);
-            server.changePort(port);
-            ClientVoicechat client = ClientManager.getClient();
-            if (client != null) {
-                ClientVoicechatConnection connection = client.getConnection();
-                if (connection != null) {
-                    Voicechat.LOGGER.info("Force disconnecting due to port change");
-                    connection.disconnect();
-                }
-            }
-            ClientServerNetManager.sendToServer(new RequestSecretPacket(Voicechat.COMPATIBILITY_VERSION));
-        } catch (Exception e) {
-            Voicechat.LOGGER.error("Failed to change voice chat port", e);
-        }
+        // Minecraft has already bound its TCP port. Keep the separate voice listener
+        // and existing connections when publishing the world to LAN.
+        Voicechat.LOGGER.info("LAN voice chat uses TCP port {} (Minecraft port {})", server.getPort(), port);
         Component portComponent = ComponentUtils.copyOnClickText(String.valueOf(server.getPort()));
         Minecraft mc = Minecraft.getInstance();
-        mc.execute(() -> mc.gui.getChat().addMessage(Component.translatable("message.voicechat.server_port", portComponent)));
+        mc.execute(() -> mc.gui.hud.getChat().addClientSystemMessage(Component.translatable("message.voicechat.server_port", portComponent)));
     }
 
     @Nullable
