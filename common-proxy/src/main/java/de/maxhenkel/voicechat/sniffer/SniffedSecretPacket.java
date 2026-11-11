@@ -21,6 +21,8 @@ public class SniffedSecretPacket {
     protected String voiceHost;
     protected boolean allowRecording;
     protected int transportProtocol = 1021;
+    protected boolean transportExtension = true;
+    public void setTransportExtension(boolean enabled) { transportExtension = enabled; }
 
     protected SniffedSecretPacket() {
 
@@ -64,7 +66,7 @@ public class SniffedSecretPacket {
         buf.writeBoolean(groupsEnabled);
         buf.writeUtf(voiceHost, 32767);
         buf.writeBoolean(allowRecording);
-        buf.writeInt(transportProtocol);
+        if (transportExtension) buf.writeInt(transportProtocol);
 
         return ByteBuffer.wrap(buf.toBytes());
     }

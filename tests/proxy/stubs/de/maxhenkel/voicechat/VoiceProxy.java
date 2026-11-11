@@ -10,6 +10,7 @@ import java.util.concurrent.*;
 /** Only the Minecraft platform adapter is replaced. The endpoint, sniffer and crypto are production code. */
 public class VoiceProxy {
     public static final int COMPATIBILITY_VERSION = 1021;
+    public static final String MOD_VERSION = "2.6.24-tcp.3.2+26.3", VERSION_CHANNEL = "voicechat:version";
     public static final String REQUEST_SECRET_CHANNEL = "voicechat:request_secret", REQUEST_SECRET_CHANNEL_1_12 = "vc:request_secret",
             SECRET_CHANNEL = "voicechat:secret", SECRET_CHANNEL_1_12 = "vc:secret", PROXY_ROUTING_CHANNEL = "voicechat:proxy_routing",
             PROXY_CONTROL_CHANNEL = "voicechat:proxy_control", PROXY_AUDIO_CHANNEL = "voicechat:proxy_audio", AVAILABILITY_CHANNEL = "voicechat:availability";
@@ -18,6 +19,7 @@ public class VoiceProxy {
     public static class Config {
         public Value<String> bindAddress = new Value<>("127.0.0.1"), voiceHost = new Value<>("");
         public Value<String> transportMode = new Value<>("tcp");
+        public Value<String> transportPreference = new Value<>("tcp,udp");
         public Value<Boolean> allowPings = new Value<>(true);
     }
     public record Delivery(UUID player, String channel, byte[] data) {}

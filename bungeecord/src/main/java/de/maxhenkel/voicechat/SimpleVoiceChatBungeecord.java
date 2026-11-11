@@ -94,6 +94,7 @@ public class SimpleVoiceChatBungeecord extends VoiceProxy implements Listener {
     public void onProxyInitialization() {
         plugin.getProxy().registerChannel(REQUEST_SECRET_CHANNEL);
         plugin.getProxy().registerChannel(REQUEST_SECRET_CHANNEL_1_12);
+        plugin.getProxy().registerChannel(VERSION_CHANNEL);
         plugin.getProxy().registerChannel(SECRET_CHANNEL);
         plugin.getProxy().registerChannel(SECRET_CHANNEL_1_12);
         plugin.getProxy().registerChannel(PROXY_ROUTING_CHANNEL);
@@ -128,6 +129,7 @@ public class SimpleVoiceChatBungeecord extends VoiceProxy implements Listener {
         }
         plugin.getProxy().unregisterChannel(REQUEST_SECRET_CHANNEL);
         plugin.getProxy().unregisterChannel(REQUEST_SECRET_CHANNEL_1_12);
+        plugin.getProxy().unregisterChannel(VERSION_CHANNEL);
         plugin.getProxy().unregisterChannel(SECRET_CHANNEL);
         plugin.getProxy().unregisterChannel(SECRET_CHANNEL_1_12);
         plugin.getProxy().unregisterChannel(PROXY_ROUTING_CHANNEL);
@@ -178,7 +180,7 @@ public class SimpleVoiceChatBungeecord extends VoiceProxy implements Listener {
         } else if (event.getReceiver() instanceof ProxiedPlayer player) {
             p = player;
             if (event.getSender() != player.getServer()) {
-                if (isPrivateChannel(event.getTag()) || event.getTag().equals(SECRET_CHANNEL)) event.setCancelled(true);
+                if (isPrivateChannel(event.getTag()) || event.getTag().equals(SECRET_CHANNEL) || event.getTag().equals(VERSION_CHANNEL)) event.setCancelled(true);
                 return;
             }
             fromServer = true;

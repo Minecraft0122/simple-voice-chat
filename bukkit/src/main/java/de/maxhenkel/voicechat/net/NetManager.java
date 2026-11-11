@@ -26,6 +26,8 @@ public class NetManager implements Listener {
             registerIncomingPacket(UpdateStatePacket.class);
             registerIncomingPacket(ProxyControlPacket.class);
             registerIncomingPacket(RequestSecretPacket.class);
+            registerIncomingPacket(VersionPacket.class);
+            registerOutgoingPacket(VersionPacket.class);
             registerIncomingPacket(CreateGroupPacket.class);
             registerIncomingPacket(JoinGroupPacket.class);
             registerIncomingPacket(LeaveGroupPacket.class);
@@ -110,7 +112,7 @@ public class NetManager implements Listener {
 
     public static void sendToClient(Player player, Packet<?> p) {
         Voicechat.compatibility.runTask(() -> {
-            if (!Voicechat.SERVER.isCompatible(player)) {
+            if (!(p instanceof VersionPacket) && !Voicechat.SERVER.isCompatible(player)) {
                 return;
             }
             try {

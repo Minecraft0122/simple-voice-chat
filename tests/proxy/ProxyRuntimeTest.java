@@ -19,6 +19,18 @@ public class ProxyRuntimeTest {
     }
     public static void main(String[] args) throws Exception {
         VoiceProxy proxy = new VoiceProxy();
+        UUID versioned = UUID.randomUUID();
+        ByteBuffer announcement = ByteBuffer.allocate(128);
+        de.maxhenkel.voicechat.util.ByteBufferWrapper announced = new de.maxhenkel.voicechat.util.ByteBufferWrapper(announcement);
+        announced.writeUtf("2.6.24-tcp.2+26.2", 128); announced.writeInt(1021);
+        check(proxy.getSniffer().onPluginMessage(VoiceProxy.VERSION_CHANNEL, false, ByteBuffer.wrap(announced.toBytes()), versioned) == null,
+                "version diagnostics are forwarded unchanged to the backend");
+        try {
+            proxy.getSniffer().onPluginMessage(VoiceProxy.REQUEST_SECRET_CHANNEL, false, ByteBuffer.allocate(4).putInt(9999).flip(), UUID.randomUUID());
+            throw new AssertionError("unknown protocol accepted");
+        } catch (de.maxhenkel.voicechat.sniffer.IncompatibleVoiceChatException expected) {
+            check(expected.getMessage().contains("9999"), "unknown protocol reports client version before secret response");
+        }
         proxy.server = new VoiceProxyServer(proxy);
         proxy.server.start();
         UUID a = UUID.randomUUID(), b = UUID.randomUUID();
@@ -142,7 +154,12 @@ public class ProxyRuntimeTest {
         proxy.getSniffer().onPluginMessage(VoiceProxy.REQUEST_SECRET_CHANNEL, false, ByteBuffer.allocate(4).putInt(version).flip(), player);
         ByteBuffer data = ByteBuffer.allocate(64).put(secret).putInt(-1).putLong(entity.getMostSignificantBits()).putLong(entity.getLeastSignificantBits())
                 .put((byte) 0).putInt(1024).putDouble(48).putInt(1000).put((byte) 1).put((byte) 0).put((byte) 0);
-        proxy.getSniffer().onPluginMessage(VoiceProxy.SECRET_CHANNEL, true, data.flip(), player);
+        ByteBuffer response = proxy.getSniffer().onPluginMessage(VoiceProxy.SECRET_CHANNEL, true, data.flip(), player);
+        // Independent old client reader: no appended transport field is allowed.
+        de.maxhenkel.voicechat.util.ByteBufferWrapper reader = new de.maxhenkel.voicechat.util.ByteBufferWrapper(response);
+        reader.readBytes(new byte[16]); reader.readInt(); reader.readUUID(); reader.readByte(); reader.readInt();
+        reader.readDouble(); reader.readInt(); reader.readBoolean(); reader.readUtf(32767); reader.readBoolean();
+        check(!reader.getBuffer().hasRemaining(), "proxy secret for legacy client has no extra four bytes");
     }
     static void route(VoiceProxy proxy, UUID player, UUID entity, long sequence, int status, boolean relay, List<UUID> targets) throws Exception {
         ByteBuffer data = ByteBuffer.allocate(128 + targets.size() * 16).putLong(entity.getMostSignificantBits()).putLong(entity.getLeastSignificantBits())

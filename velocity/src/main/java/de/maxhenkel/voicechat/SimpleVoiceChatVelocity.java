@@ -94,6 +94,7 @@ public class SimpleVoiceChatVelocity extends VoiceProxy {
         proxyServer.getChannelRegistrar().register(
                 MinecraftChannelIdentifier.from(REQUEST_SECRET_CHANNEL),
                 MinecraftChannelIdentifier.from(REQUEST_SECRET_CHANNEL_1_12),
+                MinecraftChannelIdentifier.from(VERSION_CHANNEL),
                 MinecraftChannelIdentifier.from(SECRET_CHANNEL),
                 MinecraftChannelIdentifier.from(SECRET_CHANNEL_1_12),
                 MinecraftChannelIdentifier.from(PROXY_ROUTING_CHANNEL),
@@ -171,7 +172,7 @@ public class SimpleVoiceChatVelocity extends VoiceProxy {
             p = player;
             if (!(event.getSource() instanceof ServerConnection source)
                     || player.getCurrentServer().isEmpty() || source != player.getCurrentServer().get()) {
-                if (isPrivateChannel(event.getIdentifier().getId()) || event.getIdentifier().getId().equals(SECRET_CHANNEL)) event.setResult(PluginMessageEvent.ForwardResult.handled());
+                if (isPrivateChannel(event.getIdentifier().getId()) || event.getIdentifier().getId().equals(SECRET_CHANNEL) || event.getIdentifier().getId().equals(VERSION_CHANNEL)) event.setResult(PluginMessageEvent.ForwardResult.handled());
                 return;
             }
             fromServer = true;

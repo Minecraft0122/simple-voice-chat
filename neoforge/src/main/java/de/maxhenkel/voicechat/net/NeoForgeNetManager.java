@@ -68,7 +68,7 @@ public class NeoForgeNetManager extends NetManager {
                             return;
                         }
                         try {
-                            if (!Voicechat.SERVER.isCompatible(sender) && !packetType.equals(RequestSecretPacket.class)) {
+                            if (!Voicechat.SERVER.isCompatible(sender) && !packetType.equals(RequestSecretPacket.class) && !packetType.equals(VersionPacket.class)) {
                                 return;
                             }
                             channel.onServerPacket(sender, payload);

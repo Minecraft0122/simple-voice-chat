@@ -15,7 +15,8 @@ public enum TransportMode {
         for (String item : value.split(",")) {
             VoiceProtocol protocol;
             try {
-                protocol = VoiceProtocol.valueOf(item.trim().toUpperCase(Locale.ROOT));
+                String name = item.trim().toUpperCase(Locale.ROOT);
+                protocol = name.equals("UDP") ? VoiceProtocol.LEGACY_UDP : VoiceProtocol.valueOf(name);
             } catch (RuntimeException ignored) {
                 continue;
             }

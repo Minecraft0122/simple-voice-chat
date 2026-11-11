@@ -10,6 +10,8 @@ import de.maxhenkel.voicechat.net.NetManager;
 import de.maxhenkel.voicechat.net.PacketRateLimiter;
 import de.maxhenkel.voicechat.net.RequestSecretPacket;
 import de.maxhenkel.voicechat.net.SecretPacket;
+import de.maxhenkel.voicechat.net.VersionPacket;
+import de.maxhenkel.voicechat.voice.transport.VoiceVersion;
 import de.maxhenkel.voicechat.plugins.PluginManager;
 import de.maxhenkel.voicechat.voice.common.Secret;
 import org.bukkit.Bukkit;
@@ -26,6 +28,9 @@ import java.util.concurrent.ConcurrentHashMap;
 public class ServerVoiceEvents implements Listener {
 
     private final Map<UUID, Integer> clientCompatibilities;
+    private final java.util.Set<UUID> extendedClients = ConcurrentHashMap.newKeySet();
+    private final java.util.Set<UUID> versionReported = ConcurrentHashMap.newKeySet();
+    private final java.util.Set<UUID> versionWarnings = ConcurrentHashMap.newKeySet();
     private final PacketRateLimiter rateLimiter;
     private Server server;
 
@@ -53,7 +58,6 @@ public class ServerVoiceEvents implements Listener {
 
     public void onRequestSecretPacket(Player player, RequestSecretPacket packet) {
         Voicechat.LOGGER.info("Received secret request of {} ({})", player.getName(), packet.getCompatibilityVersion());
-
         UUID playerUUID;
 
         try {
@@ -62,6 +66,13 @@ public class ServerVoiceEvents implements Listener {
             player.kickPlayer("Tried to authenticate voice chat while still connecting");
             Voicechat.LOGGER.warn("{} tried to authenticate voice chat while still connecting", player.getName());
             return;
+        }
+
+        if (packet.hasTransportExtension()) extendedClients.add(playerUUID);
+        if (!versionReported.contains(playerUUID) && versionWarnings.add(playerUUID)) {
+            String message = VoiceVersion.unverified(packet.getCompatibilityVersion(), Voicechat.INSTANCE.getDescription().getVersion());
+            Voicechat.LOGGER.warn("Player {} ({}): {}", player.getName(), playerUUID, message);
+            player.sendMessage(message);
         }
 
         VoiceProtocol selected = VoiceProtocol.fromVersion(packet.getCompatibilityVersion()) == null ? null
@@ -74,6 +85,16 @@ public class ServerVoiceEvents implements Listener {
             Integer previous = clientCompatibilities.putIfAbsent(playerUUID, selected.version());
             if (previous != null && previous != selected.version()) return;
             initializePlayerConnection(player);
+        }
+    }
+
+    public void onVersionPacket(Player player, VersionPacket packet) {
+        if (!versionReported.add(player.getUniqueId())) return;
+        String serverVersion = Voicechat.INSTANCE.getDescription().getVersion();
+        NetManager.sendToClient(player, new VersionPacket(serverVersion, Voicechat.COMPATIBILITY_VERSION));
+        if (!VoiceVersion.sameRelease(packet.getVersion(), serverVersion) || VoiceProtocol.fromVersion(packet.getProtocol()) == null) {
+            String message = VoiceVersion.mismatch(packet.getVersion(), packet.getProtocol(), serverVersion, Voicechat.COMPATIBILITY_VERSION);
+            Voicechat.LOGGER.warn("Player {} ({}): {}", player.getName(), player.getUniqueId(), message);
         }
     }
 
@@ -120,7 +141,7 @@ public class ServerVoiceEvents implements Listener {
         String voiceHost = PluginManager.instance().getVoiceHost(player, Voicechat.SERVER_CONFIG.voiceHost.get());
         int advertisedPort = Voicechat.SERVER_CONFIG.isProxyMode() ? -1 : server.getPort();
         NetManager.sendToClient(player, new SecretPacket(player, secret, advertisedPort, Voicechat.SERVER_CONFIG, voiceHost,
-                getProtocol(player.getUniqueId()).version()));
+                getProtocol(player.getUniqueId()).version()).withTransportExtension(extendedClients.contains(player.getUniqueId())));
 
         Voicechat.LOGGER.info("Sent secret to {}", player.getName());
     }
@@ -154,6 +175,9 @@ public class ServerVoiceEvents implements Listener {
         server.getGroupManager().onPlayerQuit(event);
 
         clientCompatibilities.remove(event.getPlayer().getUniqueId());
+        extendedClients.remove(event.getPlayer().getUniqueId());
+        versionReported.remove(event.getPlayer().getUniqueId());
+        versionWarnings.remove(event.getPlayer().getUniqueId());
         rateLimiter.onPlayerLoggedOut(event.getPlayer());
         if (server == null) {
             return;

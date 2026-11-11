@@ -12,6 +12,7 @@ public class RequestSecretPacket implements Packet<RequestSecretPacket> {
 
     private int compatibilityVersion;
     private int transportCapabilities;
+    private boolean transportExtension;
     private String transportPreference = "tcp,udp";
 
     public RequestSecretPacket() {
@@ -19,11 +20,13 @@ public class RequestSecretPacket implements Packet<RequestSecretPacket> {
     }
 
     public RequestSecretPacket(int compatibilityVersion) {
+        this.transportExtension = true;
         this.compatibilityVersion = compatibilityVersion;
         this.transportCapabilities = capability(compatibilityVersion);
     }
 
     public RequestSecretPacket(int compatibilityVersion, int transportCapabilities, String transportPreference) {
+        this.transportExtension = true;
         this.compatibilityVersion = compatibilityVersion;
         this.transportCapabilities = transportCapabilities;
         this.transportPreference = transportPreference == null ? "tcp,udp" : transportPreference;
@@ -32,6 +35,8 @@ public class RequestSecretPacket implements Packet<RequestSecretPacket> {
     public int getCompatibilityVersion() {
         return compatibilityVersion;
     }
+
+    public boolean hasTransportExtension() { return transportExtension; }
 
     public int getTransportCapabilities() { return transportCapabilities == 0 ? capability(compatibilityVersion) : transportCapabilities; }
     public String getTransportPreference() { return transportPreference; }
@@ -54,7 +59,8 @@ public class RequestSecretPacket implements Packet<RequestSecretPacket> {
     @Override
     public RequestSecretPacket fromBytes(FriendlyByteBuf buf) {
         compatibilityVersion = buf.readInt();
-        if (buf.isReadable()) {
+        transportExtension = buf.isReadable();
+        if (transportExtension) {
             transportCapabilities = buf.readUnsignedByte();
             transportPreference = buf.readUtf(32);
         } else {

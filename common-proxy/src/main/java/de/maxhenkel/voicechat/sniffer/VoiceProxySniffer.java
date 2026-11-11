@@ -4,6 +4,8 @@ import de.maxhenkel.voicechat.VoiceProxy;
 import de.maxhenkel.voicechat.voice.transport.VoiceAvailability;
 import de.maxhenkel.voicechat.voice.transport.VoiceProtocol;
 import de.maxhenkel.voicechat.voice.transport.TransportMode;
+import de.maxhenkel.voicechat.voice.transport.VoiceVersion;
+import de.maxhenkel.voicechat.util.ByteBufferWrapper;
 import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
 import java.util.*;
@@ -20,6 +22,8 @@ public class VoiceProxySniffer {
     private final Map<UUID, RoutingState> routes = new ConcurrentHashMap<>();
     private final Map<UUID, Long> requestedAt = new ConcurrentHashMap<>();
     private final Map<UUID, Long> retiredIdentities = new ConcurrentHashMap<>();
+    private final Set<UUID> extendedClients = ConcurrentHashMap.newKeySet();
+    private final Set<UUID> versionReported = ConcurrentHashMap.newKeySet();
     private final Set<UUID> errors = ConcurrentHashMap.newKeySet();
 
     public VoiceProxySniffer(VoiceProxy proxy) { voiceProxy = proxy; }
@@ -35,11 +39,29 @@ public class VoiceProxySniffer {
 
     public synchronized ByteBuffer onPluginMessage(String channel, boolean fromServer, ByteBuffer message, UUID player) throws IncompatibleVoiceChatException {
         if (!fromServer && VoiceProxy.isPrivateChannel(channel)) return ByteBuffer.allocate(0);
+        if (!fromServer && channel.equals(VoiceProxy.VERSION_CHANNEL)) {
+            try {
+                ByteBufferWrapper buf = new ByteBufferWrapper(message.slice());
+                String release = VoiceVersion.sanitize(buf.readUtf(128));
+                int protocol = buf.readInt();
+                if (buf.getBuffer().hasRemaining()) throw new IllegalArgumentException("Trailing version data");
+                if (versionReported.add(player) && (!VoiceVersion.sameRelease(release, VoiceProxy.MOD_VERSION) || VoiceProtocol.fromVersion(protocol) == null)) {
+                    voiceProxy.getLogger().warn("Player {}: {}", player, VoiceVersion.mismatch(release, protocol, VoiceProxy.MOD_VERSION, VoiceProxy.COMPATIBILITY_VERSION));
+                }
+            } catch (RuntimeException e) {
+                throw new IncompatibleVoiceChatException("Invalid voice version announcement", e);
+            }
+            return null;
+        }
         if (!fromServer && channel.equals(VoiceProxy.REQUEST_SECRET_CHANNEL)) {
             if (message.remaining() < 4) throw new IncompatibleVoiceChatException("Invalid secret request");
             int version = message.getInt();
+            if (VoiceProtocol.fromVersion(version) == null) {
+                throw new IncompatibleVoiceChatException("Incompatible voice protocol: client=" + version + ", proxy=" + VoiceProxy.COMPATIBILITY_VERSION);
+            }
             int capabilities = VoiceProtocol.fromVersion(version) == VoiceProtocol.LEGACY_UDP ? 1 : 2;
-            if (message.hasRemaining()) {
+            boolean extended = message.hasRemaining();
+            if (extended) {
                 capabilities = message.get() & 255;
                 readUtf(message, 32);
             }
@@ -48,6 +70,7 @@ public class VoiceProxySniffer {
             if (selected == null) throw new IncompatibleVoiceChatException("No mutually supported voice transport");
             Integer previous = compatibilityVersionMap.putIfAbsent(player, selected.version());
             if (previous != null && previous != selected.version()) return ByteBuffer.allocate(0);
+            if (extended) extendedClients.add(player);
             requestedAt.put(player, System.currentTimeMillis());
             voiceProxy.availability(player, VoiceAvailability.WAITING);
             return null;
@@ -80,6 +103,7 @@ public class VoiceProxySniffer {
         }
         SniffedSecretPacket packet = SniffedSecretPacket.fromBytes(message, version);
         packet.setTransportProtocol(version);
+        packet.setTransportExtension(extendedClients.contains(player));
         if (packet.getServerPort() != -1) {
             internalError(player, "Backend must enable proxy_mode=true");
             throw new IncompatibleVoiceChatException("Backend is not in central proxy mode");
@@ -166,6 +190,8 @@ public class VoiceProxySniffer {
         }
         backendIds.remove(player);
         compatibilityVersionMap.remove(player);
+        extendedClients.remove(player);
+        versionReported.remove(player);
         secretMap.remove(player);
         routes.remove(player);
         requestedAt.remove(player);
