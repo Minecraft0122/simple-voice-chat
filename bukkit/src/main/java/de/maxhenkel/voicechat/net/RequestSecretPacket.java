@@ -38,6 +38,11 @@ public class RequestSecretPacket implements Packet<RequestSecretPacket> {
 
     public boolean hasTransportExtension() { return transportExtension; }
 
+    public RequestSecretPacket withTransportExtension(boolean enabled) {
+        transportExtension = enabled;
+        return this;
+    }
+
     public int getTransportCapabilities() { return transportCapabilities == 0 ? capability(compatibilityVersion) : transportCapabilities; }
     public String getTransportPreference() { return transportPreference; }
 
@@ -73,8 +78,10 @@ public class RequestSecretPacket implements Packet<RequestSecretPacket> {
     @Override
     public void toBytes(FriendlyByteBuf buf) {
         buf.writeInt(compatibilityVersion);
-        buf.writeByte(transportCapabilities == 0 ? capability(compatibilityVersion) : transportCapabilities);
-        buf.writeUtf(transportPreference, 32);
+        if (transportExtension) {
+            buf.writeByte(transportCapabilities == 0 ? capability(compatibilityVersion) : transportCapabilities);
+            buf.writeUtf(transportPreference, 32);
+        }
     }
 
 }
