@@ -1,12 +1,15 @@
 package de.maxhenkel.voicechat.voice.server;
 
 import de.maxhenkel.voicechat.BuildConstants;
+import de.maxhenkel.voicechat.voice.transport.VoiceProtocol;
 import de.maxhenkel.voicechat.Voicechat;
 import de.maxhenkel.voicechat.intercompatibility.CommonCompatibilityManager;
 import de.maxhenkel.voicechat.intercompatibility.CrossSideManager;
 import de.maxhenkel.voicechat.net.NetManager;
 import de.maxhenkel.voicechat.net.PacketRateLimiter;
 import de.maxhenkel.voicechat.net.SecretPacket;
+import de.maxhenkel.voicechat.net.VersionPacket;
+import de.maxhenkel.voicechat.voice.transport.VoiceVersion;
 import de.maxhenkel.voicechat.plugins.PluginManager;
 import de.maxhenkel.voicechat.voice.common.Secret;
 import net.minecraft.ChatFormatting;
@@ -24,6 +27,9 @@ import java.util.concurrent.ConcurrentHashMap;
 public class ServerVoiceEvents {
 
     private final Map<UUID, Integer> clientCompatibilities;
+    private final java.util.Set<UUID> extendedClients = ConcurrentHashMap.newKeySet();
+    private final java.util.Set<UUID> versionReported = ConcurrentHashMap.newKeySet();
+    private final java.util.Set<UUID> versionWarnings = ConcurrentHashMap.newKeySet();
     private final PacketRateLimiter rateLimiter;
     private Server server;
 
@@ -41,8 +47,15 @@ public class ServerVoiceEvents {
         CommonCompatibilityManager.INSTANCE.onServerVoiceChatDisconnected(this::serverVoiceChatDisconnected);
         CommonCompatibilityManager.INSTANCE.onPlayerCompatibilityCheckSucceeded(this::playerCompatibilityCheckSucceeded);
 
+        CommonCompatibilityManager.INSTANCE.getNetManager().versionChannel.setServerListener(this::onVersionPacket);
         CommonCompatibilityManager.INSTANCE.getNetManager().requestSecretChannel.setServerListener((player, packet) -> {
             Voicechat.LOGGER.info("Received secret request of {} ({})", player.getName().getString(), packet.getCompatibilityVersion());
+            if (packet.hasTransportExtension()) extendedClients.add(player.getUUID());
+            if (!versionReported.contains(player.getUUID()) && versionWarnings.add(player.getUUID())) {
+                String message = VoiceVersion.unverified(packet.getCompatibilityVersion(), CommonCompatibilityManager.INSTANCE.getModVersion());
+                Voicechat.LOGGER.warn("Player {} ({}): {}", player.getName().getString(), player.getUUID(), message);
+                player.sendSystemMessage(Component.literal(message));
+            }
             clientCompatibilities.put(player.getUUID(), packet.getCompatibilityVersion());
             if (packet.getCompatibilityVersion() != Voicechat.COMPATIBILITY_VERSION) {
                 Voicechat.LOGGER.warn("Connected client {} has incompatible voice chat version (server={}, client={})", player.getName().getString(), Voicechat.COMPATIBILITY_VERSION, packet.getCompatibilityVersion());
@@ -61,6 +74,16 @@ public class ServerVoiceEvents {
                     "Your voice chat client version is not compatible with the server-side version.\nPlease install version %s of %s.",
                     Component.literal(BuildConstants.MOD_COMPATIBLE_VERSION).withStyle(ChatFormatting.BOLD),
                     Component.literal(CommonCompatibilityManager.INSTANCE.getModName()).withStyle(ChatFormatting.BOLD));
+        }
+    }
+
+    public void onVersionPacket(ServerPlayer player, VersionPacket packet) {
+        if (!versionReported.add(player.getUUID())) return;
+        String serverVersion = CommonCompatibilityManager.INSTANCE.getModVersion();
+        NetManager.sendToClient(player, new VersionPacket(serverVersion, Voicechat.COMPATIBILITY_VERSION));
+        if (!VoiceVersion.sameRelease(packet.getVersion(), serverVersion) || VoiceProtocol.fromVersion(packet.getProtocol()) == null) {
+            String message = VoiceVersion.mismatch(packet.getVersion(), packet.getProtocol(), serverVersion, Voicechat.COMPATIBILITY_VERSION);
+            Voicechat.LOGGER.warn("Player {} ({}): {}", player.getName().getString(), player.getUUID(), message);
         }
     }
 
@@ -111,7 +134,8 @@ public class ServerVoiceEvents {
             Voicechat.LOGGER.warn("A plugin modified voice_host on a non-dedicated server - Ignore this message if this is intended");
         }
 
-        NetManager.sendToClient(player, new SecretPacket(player, secret, server.getPort(), Voicechat.SERVER_CONFIG, voiceHost));
+        NetManager.sendToClient(player, new SecretPacket(player, secret, server.getPort(), Voicechat.SERVER_CONFIG, voiceHost, Voicechat.COMPATIBILITY_VERSION)
+                .withTransportExtension(extendedClients.contains(player.getUUID())));
         Voicechat.LOGGER.info("Sent secret to {}", player.getName().getString());
     }
 
@@ -151,6 +175,9 @@ public class ServerVoiceEvents {
 
     public void playerLoggedOut(ServerPlayer player) {
         clientCompatibilities.remove(player.getUUID());
+        extendedClients.remove(player.getUUID());
+        versionReported.remove(player.getUUID());
+        versionWarnings.remove(player.getUUID());
         rateLimiter.onPlayerLoggedOut(player);
         if (server == null) {
             return;

@@ -1,9 +1,7 @@
 name: Publish TCP 1.21.4 client release
 
 on:
-  push:
-    branches:
-      - tcp/1.21.4
+  workflow_dispatch:
 
 permissions:
   contents: write

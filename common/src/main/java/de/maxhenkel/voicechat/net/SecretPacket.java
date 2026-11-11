@@ -25,6 +25,12 @@ public class SecretPacket implements Packet<SecretPacket> {
     private String voiceHost;
     private boolean allowRecording;
     private int transportProtocol = 1021;
+    private boolean transportExtension = true;
+
+    public SecretPacket withTransportExtension(boolean enabled) {
+        transportExtension = enabled;
+        return this;
+    }
 
     public SecretPacket() {
 
@@ -118,7 +124,8 @@ public class SecretPacket implements Packet<SecretPacket> {
         buf.writeBoolean(groupsEnabled);
         buf.writeUtf(voiceHost);
         buf.writeBoolean(allowRecording);
-        buf.writeInt(transportProtocol);
+        // Legacy clients expect the packet to end after allowRecording.
+        if (transportExtension) buf.writeInt(transportProtocol);
     }
 
     @Override
