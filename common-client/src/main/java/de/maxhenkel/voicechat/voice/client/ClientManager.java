@@ -11,6 +11,8 @@ import de.maxhenkel.voicechat.macos.avfoundation.AVAuthorizationStatus;
 import de.maxhenkel.voicechat.net.ClientServerNetManager;
 import de.maxhenkel.voicechat.net.RequestSecretPacket;
 import de.maxhenkel.voicechat.net.SecretPacket;
+import de.maxhenkel.voicechat.net.VersionPacket;
+import de.maxhenkel.voicechat.voice.transport.VoiceVersion;
 import de.maxhenkel.voicechat.voice.client.camera.CameraState;
 import de.maxhenkel.voicechat.voice.client.camera.CameraTracker;
 import de.maxhenkel.voicechat.voice.server.Server;
@@ -40,6 +42,8 @@ public class ClientManager {
     private final KeyEvents keyEvents;
     private final Minecraft minecraft;
     private boolean hasShownPermissionsMessage;
+    private boolean serverVersionReceived;
+    private boolean secretRequested;
 
     private ClientManager() {
         playerStateManager = new ClientPlayerStateManager();
@@ -67,6 +71,18 @@ public class ClientManager {
             }
         });
 
+        ClientServerNetManager.setClientListener(CommonCompatibilityManager.INSTANCE.getNetManager().versionChannel, (player, packet) -> {
+            if (serverVersionReceived) return;
+            serverVersionReceived = true;
+            String version = CommonCompatibilityManager.INSTANCE.getModVersion();
+            Voicechat.LOGGER.info("Voice chat versions: client={} (protocol={}), server={} (protocol={})", version, Voicechat.COMPATIBILITY_VERSION, packet.getVersion(), packet.getProtocol());
+            if (!VoiceVersion.sameRelease(version, packet.getVersion()) || de.maxhenkel.voicechat.voice.transport.VoiceProtocol.fromVersion(packet.getProtocol()) == null) {
+                String message = VoiceVersion.mismatch(version, Voicechat.COMPATIBILITY_VERSION, packet.getVersion(), packet.getProtocol());
+                Voicechat.LOGGER.warn(message);
+                ChatUtils.sendModMessage(Component.literal(message).withStyle(net.minecraft.ChatFormatting.YELLOW));
+            }
+            requestSecret(true);
+        });
         ClientServerNetManager.setClientListener(CommonCompatibilityManager.INSTANCE.getNetManager().secretChannel, (player, packet) -> authenticate(packet));
         ClientServerNetManager.setClientListener(CommonCompatibilityManager.INSTANCE.getNetManager().voiceAvailabilityChannel, (player, packet) -> {
             if (client != null) {
@@ -74,6 +90,13 @@ public class ClientManager {
                 client.setAvailability(packet.getStatus());
             }
         });
+    }
+
+    private void requestSecret(boolean extended) {
+        if (client == null || secretRequested) return;
+        secretRequested = true;
+        ClientServerNetManager.sendToServer(new RequestSecretPacket(Voicechat.COMPATIBILITY_VERSION, 1 | 2, "tcp,udp")
+                .withTransportExtension(extended));
     }
 
     private void authenticate(SecretPacket secretPacket) {
@@ -119,13 +142,33 @@ public class ClientManager {
             ClientCompatibilityManager.INSTANCE.emitDisconnectedEvent();
         }
         hasShownPermissionsMessage = false;
+        serverVersionReceived = false;
+        secretRequested = false;
         Voicechat.LOGGER.info("Sending secret request to the server");
         client = new ClientVoicechat();
         ClientVoicechat joined = client;
-        ClientServerNetManager.sendToServer(new RequestSecretPacket(Voicechat.COMPATIBILITY_VERSION, 1 | 2, "tcp,udp"));
+        // Older servers may not advertise this optional channel. The normal handshake still runs.
+        try {
+            ClientServerNetManager.sendToServer(new VersionPacket(CommonCompatibilityManager.INSTANCE.getModVersion(), Voicechat.COMPATIBILITY_VERSION));
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            Voicechat.LOGGER.debug("Server does not support voice version diagnostics", e);
+            requestSecret(false);
+        }
+        Thread.ofVirtual().name("voicechat-version-check").start(() -> {
+            try { Thread.sleep(1500L); } catch (InterruptedException e) { Thread.currentThread().interrupt(); return; }
+            minecraft.execute(() -> {
+                // Unknown servers get the original four-byte request, which older decoders require.
+                if (client == joined) requestSecret(false);
+            });
+        });
         Thread.ofVirtual().name("voicechat-backend-check").start(() -> {
             try { Thread.sleep(5000L); } catch (InterruptedException e) { return; }
             minecraft.execute(() -> {
+                if (client == joined && !serverVersionReceived) {
+                    String message = "[Voice Chat] Server version unavailable / 服务器未提供语音版本信息。Client / 客户端=" + CommonCompatibilityManager.INSTANCE.getModVersion() + ". 请确认服务端已更新到支持版本检查的 TCP Voice Chat。";
+                    Voicechat.LOGGER.warn(message);
+                    ChatUtils.sendModMessage(Component.literal(message).withStyle(net.minecraft.ChatFormatting.YELLOW));
+                }
                 if (client == joined && joined.getInitializationData() == null && joined.getAvailability() == de.maxhenkel.voicechat.voice.transport.VoiceAvailability.WAITING) {
                     joined.setAvailability(de.maxhenkel.voicechat.voice.transport.VoiceAvailability.UNAVAILABLE);
                 }

@@ -1,0 +1,79 @@
+name: Verify voice version handshake
+
+on:
+  push:
+    branches: ['tcp/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  handshake:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+      - name: Check version diagnostics and legacy handshake codecs
+        run: python3 tests/version/run.py
+      - name: Check central proxy and real TCP and UDP sessions
+        if: github.ref_name == 'tcp/26.3'
+        run: |
+          bash scripts/test-tcp.sh
+          bash scripts/test-proxy.sh
+          bash scripts/test-runtime.sh
+          python3 tests/folia/run.py
+          python3 tests/client/run.py
+
+  build:
+    needs: handshake
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+      - uses: gradle/actions/setup-gradle@v6
+      - name: Build maintained client and server modules
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Ignore commented modules, so 26.3 does not accidentally build unsupported Forge.
+          modules=$(sed 's@/\*.*\*/@@g' settings.gradle | sed -n 's/^include(\(.*\))/\1/p' | tr -d "'" | tr ',' ' ')
+          tasks=()
+          for module in fabric neoforge forge paper bukkit velocity bungeecord; do
+            if printf '%s\n' "$modules" | grep -qw "$module"; then tasks+=(":$module:build"); fi
+          done
+          bash gradlew "${tasks[@]}" --console=plain
+      - name: Build Quilt where maintained
+        shell: bash
+        run: |
+          if [ -f quilt/settings.gradle ]; then
+            (cd quilt && bash ../gradlew build --console=plain)
+          fi
+      - name: Check direct protocol and generated configuration
+        if: github.ref_name == 'tcp/26.3'
+        run: |
+          python3 tests/direct/run.py
+          python3 tests/config/run.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: voicechat-version-check-${{ github.ref_name == 'tcp/26.1' && '26.1.2' || github.ref_name == 'tcp/26.3' && '26.3' || github.sha }}
+          if-no-files-found: error
+          path: |
+            fabric/build/libs/*.jar
+            neoforge/build/libs/*.jar
+            forge/build/libs/*.jar
+            quilt/build/libs/*.jar
+            paper/build/libs/*.jar
+            bukkit/build/libs/*.jar
+            velocity/build/libs/*.jar
+            bungeecord/build/libs/*.jar
+            !**/*-sources.jar
+            !**/*-javadoc.jar
+            !**/*-dev.jar

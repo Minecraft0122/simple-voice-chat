@@ -57,7 +57,7 @@ public class FabricNetManager extends NetManager {
                 PayloadTypeRegistry.serverboundPlay().register(type, codec);
                 ServerPlayNetworking.registerGlobalReceiver(type, (payload, context) -> {
                     try {
-                        if (!Voicechat.SERVER.isCompatible(context.player()) && !packetType.equals(RequestSecretPacket.class)) {
+                        if (!Voicechat.SERVER.isCompatible(context.player()) && !packetType.equals(RequestSecretPacket.class) && !packetType.equals(VersionPacket.class)) {
                             return;
                         }
                         c.onServerPacket(context.player(), payload);

@@ -39,7 +39,7 @@ public class ForgeNetManager extends NetManager {
                 CustomPayloadEvent.Context context = event.getSource();
                 if (toServer && context.isServerSide()) {
                     try {
-                        if (!Voicechat.SERVER.isCompatible(context.getSender()) && !packetType.equals(RequestSecretPacket.class)) {
+                        if (!Voicechat.SERVER.isCompatible(context.getSender()) && !packetType.equals(RequestSecretPacket.class) && !packetType.equals(VersionPacket.class)) {
                             return;
                         }
                         T packet = packetType.getDeclaredConstructor().newInstance();

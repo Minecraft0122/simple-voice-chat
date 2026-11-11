@@ -16,6 +16,7 @@ public abstract class NetManager {
     public Channel<ProxyAudioPacket> proxyAudioChannel;
     public Channel<VoiceAvailabilityPacket> voiceAvailabilityChannel;
     public Channel<RequestSecretPacket> requestSecretChannel;
+    public Channel<VersionPacket> versionChannel;
     public Channel<AddGroupPacket> addGroupChannel;
     public Channel<RemoveGroupPacket> removeGroupChannel;
     public Channel<JoinGroupPacket> joinGroupChannel;
@@ -36,6 +37,7 @@ public abstract class NetManager {
         proxyAudioChannel = registerReceiver(ProxyAudioPacket.class, true, false);
         voiceAvailabilityChannel = registerReceiver(VoiceAvailabilityPacket.class, true, false);
         requestSecretChannel = registerReceiver(RequestSecretPacket.class, false, true);
+        versionChannel = registerReceiver(VersionPacket.class, true, true);
         addGroupChannel = registerReceiver(AddGroupPacket.class, true, false);
         removeGroupChannel = registerReceiver(RemoveGroupPacket.class, true, false);
         joinGroupChannel = registerReceiver(JoinGroupPacket.class, false, true);
@@ -51,7 +53,7 @@ public abstract class NetManager {
     protected abstract void sendToServerInternal(Packet<?> packet);
 
     public static void sendToClient(ServerPlayer player, Packet<?> packet) {
-        if (!Voicechat.SERVER.isCompatible(player)) {
+        if (!(packet instanceof VersionPacket) && !Voicechat.SERVER.isCompatible(player)) {
             return;
         }
         CommonCompatibilityManager.INSTANCE.getNetManager().sendToClient(packet, player);
