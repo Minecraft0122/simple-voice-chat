@@ -20,6 +20,8 @@ mkdir -p "$output_directory"
 "$java_compiler" --release 21 -encoding UTF-8 -d "$output_directory" \
     "$transport_directory/TcpFrameCodec.java" \
     "$transport_directory/TcpConnection.java" \
+    "$transport_directory/VoiceProtocol.java" \
+    "$transport_directory/VoiceEndpoint.java" \
     "$transport_directory/TcpServer.java" \
     "$api_directory/ClientVoicechatSocket.java" \
     "$api_directory/RawUdpPacket.java" \
