@@ -12,6 +12,7 @@ import io.papermc.paper.plugin.bootstrap.PluginBootstrap;
 import io.papermc.paper.plugin.bootstrap.PluginProviderContext;
 import io.papermc.paper.plugin.lifecycle.event.LifecycleEventManager;
 import io.papermc.paper.plugin.lifecycle.event.types.LifecycleEvents;
+import io.papermc.paper.ServerBuildInfo;
 import net.minecraft.commands.CommandSourceStack;
 import org.bukkit.plugin.java.JavaPlugin;
 
@@ -19,6 +20,16 @@ public final class VoicechatBootstrap implements PluginBootstrap {
 
     @Override
     public void bootstrap(BootstrapContext context) {
+        // Paper registers bootstrap commands before onEnable. Do not leave command
+        // callbacks behind when onEnable later rejects a jar for another MC version.
+        try {
+            if (!BuildConstants.MINECRAFT_VERSION.equals(ServerBuildInfo.buildInfo().minecraftVersionId())) {
+                return;
+            }
+        } catch (Throwable ignored) {
+            // The plugin's onEnable version check will report the incompatibility.
+            return;
+        }
         LifecycleEventManager<BootstrapContext> lifecycleManager = context.getLifecycleManager();
         lifecycleManager.registerEventHandler(LifecycleEvents.COMMANDS, (event) -> {
             PaperCommonCompatibilityManager manager = (PaperCommonCompatibilityManager) CommonCompatibilityManager.INSTANCE;

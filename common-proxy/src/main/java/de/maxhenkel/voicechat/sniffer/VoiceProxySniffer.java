@@ -45,7 +45,7 @@ public class VoiceProxySniffer {
                 String release = VoiceVersion.sanitize(buf.readUtf(128));
                 int protocol = buf.readInt();
                 if (buf.getBuffer().hasRemaining()) throw new IllegalArgumentException("Trailing version data");
-                if (versionReported.add(player) && (!VoiceVersion.sameRelease(release, VoiceProxy.MOD_VERSION) || VoiceProtocol.fromVersion(protocol) == null)) {
+                if (versionReported.add(player) && !VoiceVersion.matches(release, protocol, VoiceProxy.MOD_VERSION, VoiceProxy.COMPATIBILITY_VERSION)) {
                     voiceProxy.getLogger().warn("Player {}: {}", player, VoiceVersion.mismatch(release, protocol, VoiceProxy.MOD_VERSION, VoiceProxy.COMPATIBILITY_VERSION));
                 }
             } catch (RuntimeException e) {

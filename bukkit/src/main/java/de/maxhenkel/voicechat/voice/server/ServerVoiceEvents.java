@@ -92,7 +92,7 @@ public class ServerVoiceEvents implements Listener {
         if (!versionReported.add(player.getUniqueId())) return;
         String serverVersion = Voicechat.INSTANCE.getDescription().getVersion();
         NetManager.sendToClient(player, new VersionPacket(serverVersion, Voicechat.COMPATIBILITY_VERSION));
-        if (!VoiceVersion.sameRelease(packet.getVersion(), serverVersion) || VoiceProtocol.fromVersion(packet.getProtocol()) == null) {
+        if (!VoiceVersion.matches(packet.getVersion(), packet.getProtocol(), serverVersion, Voicechat.COMPATIBILITY_VERSION)) {
             String message = VoiceVersion.mismatch(packet.getVersion(), packet.getProtocol(), serverVersion, Voicechat.COMPATIBILITY_VERSION);
             Voicechat.LOGGER.warn("Player {} ({}): {}", player.getName(), player.getUniqueId(), message);
         }
