@@ -26,7 +26,7 @@ public class ConfigTest {
         check(c.proxyAutoDetect.get() && !c.proxyMode.get(), "automatic detection defaults on, manual mode off");
         String text = Files.readString(file);
         List<String> keys = text.lines().filter(l -> !l.isBlank() && !l.startsWith("#")).map(l -> l.split("=",2)[0]).toList();
-        check(keys.subList(0,6).equals(List.of("transport_mode","port","bind_address","voice_host","proxy_mode","proxy_auto_detect")), "network then proxy key order: " + keys);
+        check(keys.subList(0,7).equals(List.of("transport_mode","transport_preference","port","bind_address","voice_host","proxy_mode","proxy_auto_detect")), "network then proxy key order: " + keys);
         check(text.contains("代理") && text.contains("dual") && text.contains("重启"), "persist bilingual comments");
         check(keys.size() == new HashSet<>(keys).size(), "no duplicate keys");
         for (var field : ServerConfig.class.getFields()) {
