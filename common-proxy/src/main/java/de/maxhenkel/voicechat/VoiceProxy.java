@@ -26,6 +26,7 @@ public abstract class VoiceProxy {
     public static final int COMPATIBILITY_VERSION = BuildConstants.COMPATIBILITY_VERSION;
 
     public static final String SECRET_CHANNEL = "voicechat:secret";
+    public static final String VERSION_CHANNEL = "voicechat:version";
     public static final String SECRET_CHANNEL_1_12 = "vc:secret";
     public static final String AVAILABILITY_CHANNEL = "voicechat:availability";
     public static final String PROXY_CONTROL_CHANNEL = "voicechat:proxy_control";
