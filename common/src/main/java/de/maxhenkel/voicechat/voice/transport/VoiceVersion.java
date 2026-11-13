@@ -14,6 +14,10 @@ public final class VoiceVersion {
         return release(first).equals(release(second));
     }
 
+    public static boolean matches(String client, int clientProtocol, String server, int serverProtocol) {
+        return sameRelease(client, server) && clientProtocol == serverProtocol;
+    }
+
     private static String release(String version) {
         String safe = sanitize(version);
         int suffix = safe.indexOf('+');
