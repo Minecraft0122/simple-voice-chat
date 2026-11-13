@@ -76,7 +76,7 @@ public class ClientManager {
             serverVersionReceived = true;
             String version = CommonCompatibilityManager.INSTANCE.getModVersion();
             Voicechat.LOGGER.info("Voice chat versions: client={} (protocol={}), server={} (protocol={})", version, Voicechat.COMPATIBILITY_VERSION, packet.getVersion(), packet.getProtocol());
-            if (!VoiceVersion.sameRelease(version, packet.getVersion()) || de.maxhenkel.voicechat.voice.transport.VoiceProtocol.fromVersion(packet.getProtocol()) == null) {
+            if (!VoiceVersion.matches(version, Voicechat.COMPATIBILITY_VERSION, packet.getVersion(), packet.getProtocol())) {
                 String message = VoiceVersion.mismatch(version, Voicechat.COMPATIBILITY_VERSION, packet.getVersion(), packet.getProtocol());
                 Voicechat.LOGGER.warn(message);
                 ChatUtils.sendModMessage(Component.literal(message).withStyle(net.minecraft.ChatFormatting.YELLOW));

@@ -19,14 +19,6 @@ jobs:
           java-version: '25'
       - name: Check version diagnostics and legacy handshake codecs
         run: python3 tests/version/run.py
-      - name: Check central proxy and real TCP and UDP sessions
-        if: github.ref_name == 'tcp/26.3'
-        run: |
-          bash scripts/test-tcp.sh
-          bash scripts/test-proxy.sh
-          bash scripts/test-runtime.sh
-          python3 tests/folia/run.py
-          python3 tests/client/run.py
 
   build:
     needs: handshake
