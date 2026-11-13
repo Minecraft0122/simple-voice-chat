@@ -67,16 +67,19 @@ public class DualTransportTest {
                 check(server.isClosed(), "shutdown unblocks a waiting reader");
             }
         }
-        try (DatagramSocket occupied = new DatagramSocket(new InetSocketAddress("127.0.0.1", 0));
-             DualVoiceServer server = new DualVoiceServer(TransportMode.DUAL, 30000)) {
-            int port = occupied.getLocalPort();
-            try { server.open(port, "127.0.0.1"); throw new AssertionError("UDP bind collision ignored"); } catch (BindException expected) {}
-            try (ServerSocket probe = new ServerSocket(port, 1, InetAddress.getLoopbackAddress())) {
-                check(server.isClosed(), "UDP bind failure rolls back the TCP listener");
+        try (ServerSocket reservedTcp = new ServerSocket(0, 1, InetAddress.getLoopbackAddress())) {
+            int port = reservedTcp.getLocalPort();
+            try (DatagramSocket occupied = new DatagramSocket(new InetSocketAddress(InetAddress.getLoopbackAddress(), port));
+                 DualVoiceServer server = new DualVoiceServer(TransportMode.DUAL, 30000)) {
+                reservedTcp.close();
+                try { server.open(port, "127.0.0.1"); throw new AssertionError("UDP bind collision ignored"); } catch (BindException expected) {}
+                try (ServerSocket probe = new ServerSocket(port, 1, InetAddress.getLoopbackAddress())) {
+                    check(server.isClosed(), "UDP bind failure rolls back the TCP listener");
+                }
+                occupied.close();
+                server.open(port, "127.0.0.1");
+                check(!server.isClosed(), "an atomic bind failure can be retried");
             }
-            occupied.close();
-            server.open(port, "127.0.0.1");
-            check(!server.isClosed(), "an atomic bind failure can be retried");
         }
         for (TransportMode mode : List.of(TransportMode.TCP, TransportMode.UDP)) {
             try (DualVoiceServer server = new DualVoiceServer(mode, 30000)) {

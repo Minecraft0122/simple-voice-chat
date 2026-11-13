@@ -3,8 +3,25 @@ from pathlib import Path
 import subprocess
 
 root = Path(__file__).resolve().parents[2]
+bootstrap = (root / 'paper/src/main/java/de/maxhenkel/voicechat/VoicechatBootstrap.java').read_text(encoding='utf-8')
+assert bootstrap.index('ServerBuildInfo.buildInfo()') < bootstrap.index('LifecycleEvents.COMMANDS'), 'Paper/Folia version must be checked before bootstrap command registration'
+server_modules = ['common']
+if (root / 'bukkit/src/main/java/de/maxhenkel/voicechat/voice/server/ServerVoiceEvents.java').exists():
+    server_modules.append('bukkit')
+for module in server_modules:
+    guard = 'packet instanceof VersionPacket' if module == 'common' else 'p instanceof VersionPacket'
+    net_path = root / f'{module}/src/main/java/de/maxhenkel/voicechat/net/NetManager.java'
+    if net_path.exists():
+        assert guard in net_path.read_text(encoding='utf-8'), f'{module} must allow version replies before voice protocol negotiation'
+    server = (root / f'{module}/src/main/java/de/maxhenkel/voicechat/voice/server/ServerVoiceEvents.java').read_text(encoding='utf-8')
+    assert 'VoiceVersion.matches' in server, f'{module} must compare exact releases and protocol numbers'
+proxy_path = root / 'common-proxy/src/main/java/de/maxhenkel/voicechat/sniffer/VoiceProxySniffer.java'
+if proxy_path.exists():
+    proxy = proxy_path.read_text(encoding='utf-8')
+    if 'VERSION_CHANNEL' in proxy:
+        assert 'VoiceVersion.matches' in proxy, 'proxy must compare exact releases and protocol numbers'
 base = 'de.maxhenkel.voicechat'
-for module in ('common', 'bukkit'):
+for module in server_modules:
     production = root / module / 'src/main/java/de/maxhenkel/voicechat'
     if not production.exists():
         continue
@@ -69,8 +86,9 @@ public class VersionTest {
   }
   BUF data=new BUF();new VersionPacket("2.6.24-tcp.3.2+26.2",1021).toBytes(data);data.flip();VersionPacket decoded=new VersionPacket().fromBytes(data);
   check(decoded.getVersion().equals("2.6.24-tcp.3.2+26.2")&&decoded.getProtocol()==1021&&data.remaining()==0,"independent version channel round trip");
-  check(!VoiceVersion.sameRelease("2.6.24-tcp.2+26.2","2.6.24-tcp.3.2+26.2"),"different TCP releases detected despite identical protocol");
-  check(VoiceVersion.sameRelease("2.6.24-tcp.3.2+1.21.4","2.6.24-tcp.3.2+26.3"),"Minecraft suffix does not produce a false mismatch across proxy versions");
+  check(!VoiceVersion.matches("2.6.24-tcp.2+26.2",1021,"2.6.24-tcp.3.2+26.2",1021),"different TCP releases detected despite identical protocol");
+  check(VoiceVersion.matches("2.6.24-tcp.3.2+1.21.4",1021,"2.6.24-tcp.3.2+26.3",1021),"Minecraft suffix does not produce a false mismatch across proxy versions");
+  check(!VoiceVersion.matches("same-release",20,"same-release",1021),"protocol mismatch detected even when release labels match");
   check(!VoiceVersion.sanitize("fake\\nversion§c").contains("\\n"),"untrusted version cannot inject log lines");
   check(TransportMode.DUAL.select("udp,tcp",3)==VoiceProtocol.LEGACY_UDP,"UDP preference selects protocol 20");
   check(TransportMode.TCP.select("udp,tcp",1)==null,"no common transport remains incompatible");
