@@ -9,7 +9,6 @@ import de.maxhenkel.voicechat.intercompatibility.CommonCompatibilityManager;
 import de.maxhenkel.voicechat.natives.LameManager;
 import de.maxhenkel.voicechat.voice.common.AudioUtils;
 import de.maxhenkel.voicechat.voice.common.NamedThreadPoolFactory;
-import de.maxhenkel.voicechat.voice.common.Utils;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.User;
@@ -22,7 +21,6 @@ import org.apache.commons.io.FileUtils;
 import javax.annotation.Nullable;
 import javax.sound.sampled.AudioFormat;
 import java.io.IOException;
-import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -53,11 +51,6 @@ public class AudioRecorder {
     private final AudioFormat stereoFormat;
 
     private final ExecutorService threadPool;
-    /**
-     * Prevent the mic thread to continue writing after the recorder is closed.
-     * Pending stuff will be flushed on closed.
-     */
-    private boolean closed;
 
     public AudioRecorder(Path location, long timestamp) {
         this.timestamp = timestamp;
@@ -74,7 +67,9 @@ public class AudioRecorder {
     }
 
     public static AudioRecorder create() {
+        long timestamp = System.currentTimeMillis();
         Calendar cal = Calendar.getInstance();
+        cal.setTimeInMillis(timestamp);
         String recordingDestination = VoicechatClient.CLIENT_CONFIG.recordingDestination.get();
         Path location;
         if (recordingDestination.trim().isEmpty()) {
@@ -82,7 +77,7 @@ public class AudioRecorder {
         } else {
             location = Paths.get(recordingDestination).resolve(FORMAT.format(cal.getTime()));
         }
-        return new AudioRecorder(location, Utils.getMilliseconds());
+        return new AudioRecorder(location, timestamp);
     }
 
     public Path getLocation() {
@@ -98,7 +93,7 @@ public class AudioRecorder {
     }
 
     public String getDuration() {
-        return getDuration(Utils.getMilliseconds());
+        return getDuration(System.currentTimeMillis());
     }
 
     public String getDuration(long currentTime) {
@@ -109,7 +104,7 @@ public class AudioRecorder {
     }
 
     public String getStorage() {
-        return getStorage(Utils.getMilliseconds());
+        return getStorage(System.currentTimeMillis());
     }
 
     public String getStorage(long currentTime) {
@@ -135,23 +130,16 @@ public class AudioRecorder {
         return location.resolve(String.format("%s.mp3", fileName));
     }
 
-    public synchronized void appendChunk(UUID uuid, long chunkTimestamp, short[] data) throws IOException {
-        if (closed) {
-            return;
-        }
+    public void appendChunk(UUID uuid, long chunkTimestamp, short[] data) throws IOException {
         if (data.length <= 0) {
             flushChunkThreaded(uuid);
             return;
         }
 
         if (!encoders.containsKey(uuid)) {
-            Path recordingFile = getRecordingFile(uuid);
-            OutputStream outputStream = Files.newOutputStream(recordingFile, StandardOpenOption.CREATE_NEW);
-            Mp3Encoder encoder = LameManager.createEncoder(stereoFormat, MP3_BITRATE, VoicechatClient.CLIENT_CONFIG.recordingQuality.get(), outputStream);
+            Mp3Encoder encoder = LameManager.createEncoder(stereoFormat, MP3_BITRATE, VoicechatClient.CLIENT_CONFIG.recordingQuality.get(), Files.newOutputStream(getRecordingFile(uuid), StandardOpenOption.CREATE_NEW));
             encoders.put(uuid, new EncoderData(encoder, timestamp));
             if (encoder == null) {
-                outputStream.close();
-                Files.delete(recordingFile);
                 throw new IOException("Failed to load mp3 encoder");
             }
         }
@@ -181,20 +169,20 @@ public class AudioRecorder {
         }
 
         long relativeTime = chunk.timestamp - encoderData.lastTimestamp;
-        short[] audio = chunk.getData();
 
         if (relativeTime < -100L) {
-            Voicechat.LOGGER.warn("Audio snippet {} overlaps more than 100ms with previous snippet, cutting off overlap.", chunk.timestamp);
-            int overlapShorts = (int) Math.min(getAudioShortLength(-relativeTime), audio.length);
-            audio = Arrays.copyOfRange(audio, overlapShorts, audio.length);
+            Voicechat.LOGGER.warn("Audio snippet {} overlaps more than 100ms with previous snippet.", chunk.timestamp);
+            return;
         } else if (relativeTime < -20L) {
             Voicechat.LOGGER.warn("Audio {} overlaps with previous snippet.", chunk.timestamp);
         }
-        long silenceMillis = Math.max(relativeTime, 0L);
+        if (relativeTime < 0L) {
+            relativeTime = 0L;
+        }
 
-        long silenceShorts = getAudioShortLength(silenceMillis);
+        int silenceShorts = (int) (relativeTime * getSamplesPerMs() * stereoFormat.getChannels());
         int tenSeconds = (int) stereoFormat.getSampleRate() * stereoFormat.getChannels() * 10;
-        long insertedSilence = 0L;
+        int insertedSilence = 0;
 
         if (silenceShorts > tenSeconds) {
             short[] silence = new short[tenSeconds];
@@ -204,17 +192,15 @@ public class AudioRecorder {
             }
         }
 
-        short[] silence = new short[(int) (silenceShorts - insertedSilence)];
+        short[] silence = new short[silenceShorts - insertedSilence];
         encoderData.encoder.encode(silence);
+        short[] audio = chunk.getData();
         encoderData.encoder.encode(audio);
 
-        encoderData.lastTimestamp += silenceMillis + getAudioTimeMillis(audio.length);
+        encoderData.lastTimestamp = chunk.timestamp + getAudioTimeMillis(audio.length);
     }
 
-    public synchronized void flushChunkThreaded(UUID playerUUID) {
-        if (closed) {
-            return;
-        }
+    public void flushChunkThreaded(UUID playerUUID) {
         AudioChunk chunk = getAndRemoveChunk(playerUUID);
         if (chunk == null) {
             return;
@@ -260,8 +246,7 @@ public class AudioRecorder {
         threadPool.shutdown();
     }
 
-    public synchronized void saveAndClose() {
-        closed = true;
+    public void saveAndClose() {
         save();
         close();
     }
@@ -319,14 +304,10 @@ public class AudioRecorder {
         Minecraft mc = Minecraft.getInstance();
         LocalPlayer player = mc.player;
         if (player != null && mc.level != null) {
-            ChatUtils.sendPlayerMessage(msg);
+            mc.execute(() -> ChatUtils.sendPlayerMessage(msg));
         } else {
             Voicechat.LOGGER.info("{}", msg.getString());
         }
-    }
-
-    private long getAudioShortLength(long millis) {
-        return millis * getSamplesPerMs() * stereoFormat.getChannels();
     }
 
     private int getAudioTimeMillis(int audioShortLength) {

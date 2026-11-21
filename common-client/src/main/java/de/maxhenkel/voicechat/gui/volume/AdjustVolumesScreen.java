@@ -4,7 +4,6 @@ import de.maxhenkel.voicechat.Voicechat;
 import de.maxhenkel.voicechat.gui.VoiceChatScreenBase;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
-import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.client.renderer.RenderPipelines;
@@ -20,22 +19,15 @@ public class AdjustVolumesScreen extends VoiceChatScreenBase {
     protected static final Component TITLE = Component.translatable("gui.voicechat.adjust_volume.title");
     protected static final Component SEARCH_HINT = Component.translatable("message.voicechat.search_hint").withStyle(ChatFormatting.ITALIC).withStyle(ChatFormatting.GRAY);
     protected static final Component EMPTY_SEARCH = Component.translatable("message.voicechat.search_empty").withStyle(ChatFormatting.GRAY);
-    protected static final Component NO_PLAYERS = Component.translatable("message.voicechat.no_players").withStyle(ChatFormatting.GRAY);
-    protected static final Component PLAYERS_TAB = Component.translatable("message.voicechat.volume_tab.players");
-    protected static final Component OTHER_TAB = Component.translatable("message.voicechat.volume_tab.other");
 
     protected static final int HEADER_SIZE = 16;
     protected static final int FOOTER_SIZE = 8;
     protected static final int SEARCH_HEIGHT = 16;
     protected static final int UNIT_SIZE = 18;
     protected static final int CELL_HEIGHT = 36;
-    protected static final int TAB_HEIGHT = 20;
-    protected static final int TAB_SPACING = 2;
 
     protected AdjustVolumeList volumeList;
     protected EditBox searchBox;
-    protected Button playersTab;
-    protected Button otherTab;
     protected String lastSearch;
     protected int units;
 
@@ -45,12 +37,17 @@ public class AdjustVolumesScreen extends VoiceChatScreenBase {
     }
 
     @Override
+    public void tick() {
+        super.tick();
+    }
+
+    @Override
     protected void init() {
         super.init();
         guiLeft = guiLeft + 2;
         guiTop = 32;
         int minUnits = Mth.ceil((float) (CELL_HEIGHT + SEARCH_HEIGHT + 4) / (float) UNIT_SIZE);
-        units = Math.max(minUnits, (height - HEADER_SIZE - FOOTER_SIZE - guiTop * 2) / UNIT_SIZE);
+        units = Math.max(minUnits, (height - HEADER_SIZE - FOOTER_SIZE - guiTop * 2 - SEARCH_HEIGHT) / UNIT_SIZE);
         ySize = HEADER_SIZE + units * UNIT_SIZE + FOOTER_SIZE;
 
         if (volumeList != null) {
@@ -68,22 +65,6 @@ public class AdjustVolumesScreen extends VoiceChatScreenBase {
         searchBox.setResponder(this::checkSearchStringUpdate);
         addWidget(searchBox);
         addWidget(volumeList);
-
-        int tabY = guiTop - TAB_HEIGHT - TAB_SPACING;
-        int tabWidth = (xSize - TAB_SPACING) / 2;
-        playersTab = addRenderableWidget(Button.builder(PLAYERS_TAB, button -> showPlayers(true)).bounds(guiLeft, tabY, tabWidth, TAB_HEIGHT).build());
-        otherTab = addRenderableWidget(Button.builder(OTHER_TAB, button -> showPlayers(false)).bounds(guiLeft + xSize - tabWidth, tabY, tabWidth, TAB_HEIGHT).build());
-        updateTabButtons();
-    }
-
-    private void showPlayers(boolean showPlayers) {
-        volumeList.setShowPlayers(showPlayers);
-        updateTabButtons();
-    }
-
-    private void updateTabButtons() {
-        playersTab.active = !volumeList.isShowingPlayers();
-        otherTab.active = volumeList.isShowingPlayers();
     }
 
     @Override
@@ -103,8 +84,6 @@ public class AdjustVolumesScreen extends VoiceChatScreenBase {
             volumeList.extractRenderState(guiGraphics, mouseX, mouseY, delta);
         } else if (!searchBox.getValue().isEmpty()) {
             guiGraphics.centeredText(font, EMPTY_SEARCH, width / 2, guiTop + HEADER_SIZE + (units * UNIT_SIZE) / 2 - font.lineHeight / 2, -1);
-        } else if (volumeList.isShowingPlayers()) {
-            guiGraphics.centeredText(font, NO_PLAYERS, width / 2, guiTop + HEADER_SIZE + (units * UNIT_SIZE) / 2 - font.lineHeight / 2, -1);
         }
         if (!searchBox.isFocused() && searchBox.getValue().isEmpty()) {
             guiGraphics.text(font, SEARCH_HINT, searchBox.getX(), searchBox.getY(), -1, false);

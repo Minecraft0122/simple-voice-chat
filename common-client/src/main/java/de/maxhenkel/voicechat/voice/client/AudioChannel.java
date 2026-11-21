@@ -49,7 +49,7 @@ public class AudioChannel extends Thread {
         this.uuid = uuid;
         this.queue = new LinkedBlockingQueue<>();
         this.packetBuffer = new AudioPacketBuffer(VoicechatClient.CLIENT_CONFIG.audioPacketThreshold.get());
-        this.lastPacketTime = Utils.getMilliseconds();
+        this.lastPacketTime = System.currentTimeMillis();
         this.stopped = false;
         this.decoder = OpusManager.createDecoder();
         this.lastSequenceNumber = -1L;
@@ -61,7 +61,7 @@ public class AudioChannel extends Thread {
     }
 
     public boolean canKill() {
-        return Utils.getMilliseconds() - lastPacketTime > 30_000L;
+        return System.currentTimeMillis() - lastPacketTime > 30_000L;
     }
 
     public void closeAndKill() {
@@ -115,7 +115,7 @@ public class AudioChannel extends Thread {
                 if (packet == null) {
                     continue;
                 }
-                lastPacketTime = Utils.getMilliseconds();
+                lastPacketTime = System.currentTimeMillis();
 
                 if (!packet.isFromClientAudioChannel() && lastSequenceNumber >= 0 && packet.getSequenceNumber() <= lastSequenceNumber) {
                     continue;
@@ -137,7 +137,7 @@ public class AudioChannel extends Thread {
                     packetBuffer.clear();
                     flushRecording();
                     decoder.resetState();
-                    client.getTalkCache().stopTalking(uuid, packet.getCategory());
+                    client.getTalkCache().updateLevel(uuid, packet.getCategory(), false, new short[0]);
                     continue;
                 }
 
@@ -201,10 +201,9 @@ public class AudioChannel extends Thread {
         if (VoicechatClient.USERNAME_CACHE.has(uuid)) {
             channelVolume = (float) VoicechatClient.PLAYER_VOLUME_CONFIG.getVolume(uuid);
         } else if (category != null) {
-            channelVolume = (float) ClientManager.getCategoryManager().getEffectiveVolume(category);
-        } else {
-            category = CategoryVolumeConfig.OTHER_CATEGORY;
             channelVolume = (float) VoicechatClient.CATEGORY_VOLUME_CONFIG.getVolume(category);
+        } else {
+            channelVolume = (float) VoicechatClient.CATEGORY_VOLUME_CONFIG.getVolume(CategoryVolumeConfig.OTHER_CATEGORY);
         }
 
         float volume = VoicechatClient.CLIENT_CONFIG.voiceChatVolume.get().floatValue() * channelVolume;
@@ -286,7 +285,7 @@ public class AudioChannel extends Thread {
     private void appendRecording(Supplier<short[]> stereo) {
         if (client.getRecorder() != null) {
             try {
-                client.getRecorder().appendChunk(uuid, Utils.getMilliseconds(), stereo.get());
+                client.getRecorder().appendChunk(uuid, System.currentTimeMillis(), stereo.get());
             } catch (IOException e) {
                 Voicechat.LOGGER.error("Failed to record audio", e);
                 client.setRecording(false);

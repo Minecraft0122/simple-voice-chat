@@ -1,10 +1,6 @@
 package de.maxhenkel.voicechat.gui.volume;
 
-import de.maxhenkel.voicechat.config.VolumeConfigBase;
 import de.maxhenkel.voicechat.gui.widgets.DebouncedSlider;
-import de.maxhenkel.voicechat.voice.client.ClientManager;
-import de.maxhenkel.voicechat.voice.client.ClientVoicechat;
-import de.maxhenkel.voicechat.voice.client.TalkCache;
 import de.maxhenkel.voicechat.voice.common.AudioUtils;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.network.chat.Component;
@@ -16,10 +12,12 @@ public class AdjustVolumeSlider extends DebouncedSlider {
     protected static final double YELLOW_DB = -20D;
     protected static final double RED_DB = -6D;
 
+    protected static final float MAXIMUM = 4F;
+
     protected final AdjustVolumeEntry volumeConfigEntry;
 
     public AdjustVolumeSlider(int xIn, int yIn, int widthIn, int heightIn, AdjustVolumeEntry volumeConfigEntry) {
-        super(xIn, yIn, widthIn, heightIn, Component.empty(), volumeConfigEntry.get() / VolumeConfigBase.MAX_VOLUME);
+        super(xIn, yIn, widthIn, heightIn, Component.empty(), volumeConfigEntry.get() / MAXIMUM);
         this.volumeConfigEntry = volumeConfigEntry;
         updateMessage();
     }
@@ -30,22 +28,19 @@ public class AdjustVolumeSlider extends DebouncedSlider {
             setMessage(MUTED);
             return;
         }
-        long amp = Math.round(value * VolumeConfigBase.MAX_VOLUME * 100D - 100D);
+        long amp = Math.round(value * MAXIMUM * 100F - 100F);
         setMessage(Component.translatable("message.voicechat.volume_amplification", (amp > 0F ? "+" : "") + amp + "%"));
     }
 
     @Override
     public void extractWidgetRenderState(GuiGraphicsExtractor guiGraphics, int i, int j, float f) {
         super.extractWidgetRenderState(guiGraphics, i, j, f);
-        ClientVoicechat client = ClientManager.getClient();
-        if (client == null) {
-            return;
-        }
-        double audioLevel = volumeConfigEntry.getAudioLevel(client.getTalkCache());
+        double audioLevel = volumeConfigEntry.getAudioLevel();
         if (audioLevel <= AudioUtils.LOWEST_DB) {
             return;
         }
-        int barWidth = (int) ((double) getWidth() * AudioUtils.dbToPerc(audioLevel));
+        double adjustedLevel = AudioUtils.linearToDb(getMultiplier());
+        int barWidth = (int) ((double) getWidth() * AudioUtils.dbToPerc(audioLevel + adjustedLevel));
         double yellowPerc = AudioUtils.dbToPerc(YELLOW_DB);
         double redPerc = AudioUtils.dbToPerc(RED_DB);
         int greenWidth = (int) ((double) getWidth() * yellowPerc);
@@ -66,7 +61,7 @@ public class AdjustVolumeSlider extends DebouncedSlider {
     }
 
     private double getMultiplier() {
-        return value * VolumeConfigBase.MAX_VOLUME;
+        return value * MAXIMUM;
     }
 
     public interface AdjustVolumeEntry {
@@ -74,7 +69,7 @@ public class AdjustVolumeSlider extends DebouncedSlider {
 
         double get();
 
-        double getAudioLevel(TalkCache talkCache);
+        double getAudioLevel();
     }
 
 }

@@ -15,6 +15,7 @@ import java.io.BufferedInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public class TestSoundPlayer {
@@ -42,7 +43,6 @@ public class TestSoundPlayer {
 
     public static void playTestSound(Runnable onDone) {
         if (!running.compareAndSet(false, true)) {
-            onDone.run();
             return;
         }
         Thread thread = new Thread(() -> play(onDone));
@@ -66,11 +66,8 @@ public class TestSoundPlayer {
             }
             Speaker speaker = null;
             try {
-                speaker = SpeakerManager.createSpeaker(soundManager, null);
+                speaker = SpeakerManager.createSpeaker(soundManager, UUID.randomUUID());
                 for (short[] shorts : testSound) {
-                    if (soundManager.isClosing()) {
-                        break;
-                    }
                     speaker.play(shorts, 1F, null);
                     Utils.sleep(20);
                 }
@@ -85,10 +82,9 @@ public class TestSoundPlayer {
             }
         } catch (Exception e) {
             Voicechat.LOGGER.error("Failed to play test sound", e);
-        } finally {
-            running.set(false);
-            onDone.run();
         }
+        running.set(false);
+        onDone.run();
     }
 
     private static short[][] loadTestSound() throws IOException, UnsupportedAudioFileException {

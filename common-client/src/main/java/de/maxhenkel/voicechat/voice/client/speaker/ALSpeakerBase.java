@@ -17,7 +17,6 @@ import javax.annotation.Nullable;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
@@ -25,7 +24,8 @@ public abstract class ALSpeakerBase implements Speaker {
 
     protected final SoundManager soundManager;
     protected final int sampleRate;
-    protected final int frameSize;
+    protected int bufferSize;
+    protected int bufferSampleSize;
     protected int source;
     protected volatile int bufferIndex;
     protected final int[] buffers;
@@ -34,17 +34,18 @@ public abstract class ALSpeakerBase implements Speaker {
     @Nullable
     protected UUID audioChannelId;
 
-    public ALSpeakerBase(SoundManager soundManager, int sampleRate, int frameSize, @Nullable UUID audioChannelId) {
+    public ALSpeakerBase(SoundManager soundManager, int sampleRate, int bufferSize, @Nullable UUID audioChannelId) {
         this.soundManager = soundManager;
         this.sampleRate = sampleRate;
-        this.frameSize = frameSize;
+        this.bufferSize = bufferSize;
+        this.bufferSampleSize = bufferSize;
         this.audioChannelId = audioChannelId;
         this.buffers = new int[32];
         String threadName;
         if (audioChannelId == null) {
             threadName = "SoundSourceThread";
         } else {
-            threadName = String.format("SoundSourceThread-%s", audioChannelId);
+            threadName = "SoundSourceThread-%s".formatted(audioChannelId);
         }
         executor = Executors.newSingleThreadExecutor(NamedThreadPoolFactory.create(threadName));
     }
@@ -59,10 +60,7 @@ public abstract class ALSpeakerBase implements Speaker {
             return;
         }
         source = AL11.alGenSources();
-        if (SoundManager.checkAlError()) {
-            Voicechat.LOGGER.error("Failed to create OpenAL source for audio channel {} - The source limit might be reached. This channels audio will be silent until recreated.", audioChannelId);
-            return;
-        }
+        SoundManager.checkAlError();
         AL11.alSourcei(source, AL11.AL_LOOPING, AL11.AL_FALSE);
         SoundManager.checkAlError();
 
@@ -79,22 +77,13 @@ public abstract class ALSpeakerBase implements Speaker {
 
     @Override
     public void play(short[] data, float volume, @Nullable Vec3 position, @Nullable String category, float maxDistance) {
-        if (data.length == 0) {
-            return;
-        }
-        if (data.length != frameSize) {
-            throw new IllegalArgumentException(String.format("Expected %d samples, got %d", frameSize, data.length));
-        }
         runInContext(() -> {
-            if (!hasValidSourceSync()) {
-                return;
-            }
             removeProcessedBuffersSync();
             boolean stopped = isStoppedSync();
             if (stopped) {
                 Voicechat.LOGGER.debug("Filling playback buffer {}", audioChannelId);
                 for (int i = 0; i < getBufferSize(); i++) {
-                    writeSync(new short[frameSize], 1F, position, category, maxDistance);
+                    writeSync(new short[bufferSize], 1F, position, category, maxDistance);
                 }
             }
 
@@ -132,11 +121,9 @@ public abstract class ALSpeakerBase implements Speaker {
             Voicechat.LOGGER.warn("Full playback buffer: {}/{}", queuedBuffers, buffers.length);
             int sampleOffset = AL11.alGetSourcei(source, AL11.AL_SAMPLE_OFFSET);
             SoundManager.checkAlError();
-            int skipOffset = (queuedBuffers - getBufferSize()) * frameSize;
-            if (sampleOffset < skipOffset) {
-                AL11.alSourcei(source, AL11.AL_SAMPLE_OFFSET, skipOffset);
-                SoundManager.checkAlError();
-            }
+            int buffersToSkip = queuedBuffers - getBufferSize();
+            AL11.alSourcei(source, AL11.AL_SAMPLE_OFFSET, sampleOffset + buffersToSkip * bufferSampleSize);
+            SoundManager.checkAlError();
             removeProcessedBuffersSync();
         }
 
@@ -158,6 +145,9 @@ public abstract class ALSpeakerBase implements Speaker {
         SoundManager.checkAlError();
 
         AL11.alSourcef(source, AL11.AL_MAX_DISTANCE, maxDistance);
+        SoundManager.checkAlError();
+
+        AL11.alSourcef(source, AL11.AL_REFERENCE_DISTANCE, maxDistance / 2F);
         SoundManager.checkAlError();
     }
 
@@ -221,6 +211,14 @@ public abstract class ALSpeakerBase implements Speaker {
         source = 0;
     }
 
+    public void checkBufferEmpty(Runnable onEmpty) {
+        runInContext(() -> {
+            if (getStateSync() == AL11.AL_STOPPED || getQueuedBuffersSync() <= 0) {
+                onEmpty.run();
+            }
+        });
+    }
+
     protected void removeProcessedBuffersSync() {
         int processed = AL11.alGetSourcei(source, AL11.AL_BUFFERS_PROCESSED);
         SoundManager.checkAlError();
@@ -248,17 +246,16 @@ public abstract class ALSpeakerBase implements Speaker {
         return validSource;
     }
 
-    protected void runInContext(Runnable runnable) {
-        try {
-            soundManager.runInContext(executor, runnable);
-        } catch (RejectedExecutionException e) {
-            Voicechat.LOGGER.debug("Ignoring speaker task after shutdown");
+    public void runInContext(Runnable runnable) {
+        if (executor.isShutdown()) {
+            return;
         }
+        soundManager.runInContext(executor, runnable);
     }
 
     public void fetchQueuedBuffersAsync(Consumer<Integer> supplier) {
         runInContext(() -> {
-            if (!hasValidSourceSync() || isStoppedSync()) {
+            if (isStoppedSync()) {
                 supplier.accept(-1);
                 return;
             }

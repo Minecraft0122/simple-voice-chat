@@ -15,17 +15,16 @@ import java.util.List;
 public class ALMicrophone implements Microphone {
 
     private final int sampleRate;
-    private final String requestedDeviceName;
     @Nullable
-    private String deviceName;
+    private final String deviceName;
     private long device;
     private final int bufferSize;
     private boolean captureStereo;
     private boolean started;
 
-    public ALMicrophone(int sampleRate, int bufferSize, String requestedDeviceName) {
+    public ALMicrophone(int sampleRate, int bufferSize, @Nullable String deviceName) {
         this.sampleRate = sampleRate;
-        this.requestedDeviceName = requestedDeviceName;
+        this.deviceName = deviceName;
         this.bufferSize = bufferSize;
     }
 
@@ -38,9 +37,7 @@ public class ALMicrophone implements Microphone {
             throw new MicrophoneException("Extension 'ALC_EXT_CAPTURE' not supported");
         }
         captureStereo = useStereoWorkaround();
-        device = openMic(requestedDeviceName);
-        deviceName = ALC11.alcGetString(device, ALC11.ALC_CAPTURE_DEVICE_SPECIFIER);
-        Voicechat.LOGGER.info("Opened microphone '{}'", deviceName);
+        device = openMic(deviceName);
     }
 
     @Override
@@ -101,17 +98,6 @@ public class ALMicrophone implements Microphone {
         return started;
     }
 
-    @Nullable
-    @Override
-    public String getDeviceName() {
-        return deviceName;
-    }
-
-    @Override
-    public boolean isDisconnected() {
-        return SoundManager.isDisconnected(device);
-    }
-
     @Override
     public int available() {
         int samples = ALC11.alcGetInteger(device, ALC11.ALC_CAPTURE_SAMPLES);
@@ -136,7 +122,19 @@ public class ALMicrophone implements Microphone {
         }
     }
 
-    private long openMic(String string) throws MicrophoneException {
+    private long openMic(@Nullable String name) throws MicrophoneException {
+        try {
+            return tryOpenMic(name);
+        } catch (MicrophoneException e) {
+            if (name == null) {
+                throw e;
+            }
+            Voicechat.LOGGER.warn("Failed to open microphone '{}', falling back to default microphone", name);
+            return tryOpenMic(null);
+        }
+    }
+
+    private long tryOpenMic(@Nullable String string) throws MicrophoneException {
         long device = ALC11.alcCaptureOpenDevice(string, sampleRate, captureStereo ? EXTFloat32.AL_FORMAT_STEREO_FLOAT32 : EXTFloat32.AL_FORMAT_MONO_FLOAT32, bufferSize);
         if (device == 0L) {
             throw new MicrophoneException("Failed to open microphone");

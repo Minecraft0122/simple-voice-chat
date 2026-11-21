@@ -1,7 +1,6 @@
 package de.maxhenkel.voicechat.voice.client;
 
 import de.maxhenkel.voicechat.voice.common.AudioUtils;
-import de.maxhenkel.voicechat.voice.common.Utils;
 import net.minecraft.world.entity.Entity;
 
 import javax.annotation.Nullable;
@@ -14,6 +13,8 @@ public class TalkCache {
 
     private static final long TIMEOUT = 250L;
 
+    private static final PlayerCache DEFAULT = new PlayerCache(0L, false, AudioUtils.LOWEST_DB);
+
     private final Map<UUID, PlayerCache> playerCache;
     private final Map<String, CategoryCache> categoryCache;
     private Supplier<Long> timestampSupplier;
@@ -21,7 +22,7 @@ public class TalkCache {
     public TalkCache() {
         this.playerCache = new HashMap<>();
         this.categoryCache = new HashMap<>();
-        this.timestampSupplier = Utils::getMilliseconds;
+        this.timestampSupplier = System::currentTimeMillis;
     }
 
     public void setTimestampSupplier(Supplier<Long> timestampSupplier) {
@@ -69,13 +70,6 @@ public class TalkCache {
         updateTalking(id, whispering, highestAudioLevel);
     }
 
-    public void stopTalking(UUID id, @Nullable String category) {
-        playerCache.remove(id);
-        if (category != null) {
-            categoryCache.remove(category);
-        }
-    }
-
     public boolean isTalking(Entity entity) {
         return isTalking(entity.getUUID());
     }
@@ -94,10 +88,7 @@ public class TalkCache {
             }
         }
 
-        PlayerCache lastTalk = playerCache.get(entity);
-        if (lastTalk == null) {
-            return false;
-        }
+        PlayerCache lastTalk = playerCache.getOrDefault(entity, DEFAULT);
         return timestampSupplier.get() - lastTalk.timestamp < TIMEOUT;
     }
 
@@ -111,10 +102,7 @@ public class TalkCache {
             }
         }
 
-        PlayerCache lastTalk = playerCache.get(entity);
-        if (lastTalk == null) {
-            return false;
-        }
+        PlayerCache lastTalk = playerCache.getOrDefault(entity, DEFAULT);
         return lastTalk.whispering && timestampSupplier.get() - lastTalk.timestamp < TIMEOUT;
     }
 
@@ -130,10 +118,7 @@ public class TalkCache {
     }
 
     public double getPlayerAudioLevel(UUID entity) {
-        PlayerCache talk = playerCache.get(entity);
-        if (talk == null) {
-            return AudioUtils.LOWEST_DB;
-        }
+        PlayerCache talk = playerCache.getOrDefault(entity, DEFAULT);
         if (timestampSupplier.get() - talk.timestamp >= TIMEOUT) {
             return AudioUtils.LOWEST_DB;
         }
