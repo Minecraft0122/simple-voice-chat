@@ -13,52 +13,42 @@ import java.util.UUID;
 
 public class PlayerStateChangedEventImpl extends ServerEventImpl implements PlayerStateChangedEvent {
 
-    protected final UUID playerUuid;
-    protected final boolean muted;
-    protected final boolean forceMuted;
-    protected final boolean disabled;
-    protected final boolean forceDisabled;
-    protected final boolean disconnected;
+    protected final PlayerState state;
     @Nullable
     protected VoicechatConnectionImpl connection;
 
     public PlayerStateChangedEventImpl(PlayerState state) {
-        this.playerUuid = state.getUuid();
-        this.muted = state.isMutedOrForceMuted();
-        this.forceMuted = state.isForceMuted();
-        this.disabled = state.isDisabledOrForceDisabled();
-        this.forceDisabled = state.isForceDisabled();
-        this.disconnected = state.isDisconnected();
+        this.state = state;
     }
 
     @Override
     public boolean isMuted() {
-        return muted;
+        return false;
     }
 
     @Override
     public boolean isForceMuted() {
-        return forceMuted;
-    }
-
-    @Override
-    public boolean isDisabled() {
-        return disabled;
+        return false;
     }
 
     @Override
     public boolean isForceDisabled() {
-        return forceDisabled;
+        return false;
+    }
+
+    @Override
+    public boolean isDisabled() {
+        return state.isDisabled();
     }
 
     @Override
     public boolean isDisconnected() {
-        return disconnected;
+        return state.isDisconnected();
     }
 
     @Override
     public UUID getPlayerUuid() {
-        return playerUuid;
+        return state.getUuid();
     }
 
     @Override
@@ -69,7 +59,7 @@ public class PlayerStateChangedEventImpl extends ServerEventImpl implements Play
             if (server == null) {
                 return null;
             }
-            ServerPlayer player = server.getServer().getPlayerList().getPlayer(playerUuid);
+            ServerPlayer player = server.getServer().getPlayerList().getPlayer(state.getUuid());
             if (player == null) {
                 return null;
             }

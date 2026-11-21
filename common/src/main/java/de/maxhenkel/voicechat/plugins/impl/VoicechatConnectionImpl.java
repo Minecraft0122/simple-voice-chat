@@ -14,25 +14,15 @@ public class VoicechatConnectionImpl implements VoicechatConnection {
 
     private final ServerPlayer player;
     private final net.minecraft.server.level.ServerPlayer serverPlayer;
+    private final PlayerState state;
     @Nullable
     private final Group group;
-    private final boolean connected;
-    private final boolean muted;
-    private final boolean forceMuted;
-    private final boolean disabled;
-    private final boolean forceDisabled;
-    private final boolean installed;
 
     public VoicechatConnectionImpl(net.minecraft.server.level.ServerPlayer player, PlayerState state) {
         this.serverPlayer = player;
         this.player = new ServerPlayerImpl(player);
+        this.state = state;
         this.group = GroupImpl.create(state);
-        this.connected = !state.isDisconnected();
-        this.muted = state.isMutedOrForceMuted();
-        this.forceMuted = state.isForceMuted();
-        this.disabled = state.isDisabledOrForceDisabled();
-        this.forceDisabled = state.isForceDisabled();
-        this.installed = Voicechat.SERVER.isCompatible(player);
     }
 
     @Nullable
@@ -68,7 +58,6 @@ public class VoicechatConnectionImpl implements VoicechatConnection {
         if (server == null) {
             return;
         }
-        server.getPlayerStateManager().checkIfStateCanBeModified();
         if (group == null) {
             server.getGroupManager().leaveGroup(serverPlayer);
             return;
@@ -77,7 +66,7 @@ public class VoicechatConnectionImpl implements VoicechatConnection {
             de.maxhenkel.voicechat.voice.server.Group actualGroup = server.getGroupManager().getGroup(g.getGroup().getId());
             if (actualGroup == null) {
                 server.getGroupManager().addGroup(g.getGroup(), serverPlayer);
-                return;
+                actualGroup = g.getGroup();
             }
             server.getGroupManager().joinGroup(actualGroup, serverPlayer, g.getGroup().getPassword());
         }
@@ -85,7 +74,7 @@ public class VoicechatConnectionImpl implements VoicechatConnection {
 
     @Override
     public boolean isConnected() {
-        return connected;
+        return !state.isDisconnected();
     }
 
     @Override
@@ -98,8 +87,7 @@ public class VoicechatConnectionImpl implements VoicechatConnection {
             return;
         }
         PlayerStateManager manager = server.getPlayerStateManager();
-        manager.checkIfStateCanBeModified();
-        PlayerState actualState = manager.getState(serverPlayer.getUUID());
+        PlayerState actualState = manager.getState(state.getUuid());
         if (actualState == null) {
             return;
         }
@@ -107,44 +95,49 @@ public class VoicechatConnectionImpl implements VoicechatConnection {
             return;
         }
         actualState.setDisconnected(!connected);
-        manager.broadcastState(serverPlayer, actualState);
-    }
-
-    @Override
-    public boolean isMuted() {
-        return muted;
-    }
-
-    @Override
-    public void setMuted(boolean muted) {
-        if (isInstalled()) {
-            return;
-        }
-        Server server = Voicechat.SERVER.getServer();
-        if (server == null) {
-            return;
-        }
-        PlayerStateManager manager = server.getPlayerStateManager();
-        manager.checkIfStateCanBeModified();
-        PlayerState actualState = manager.getState(serverPlayer.getUUID());
-        if (actualState == null) {
-            return;
-        }
-        if (actualState.isMuted() == muted) {
-            return;
-        }
-        actualState.setMuted(muted);
-        manager.broadcastState(serverPlayer, actualState);
-    }
-
-    @Override
-    public boolean isForceMuted() {
-        return forceMuted;
+        manager.broadcastState(null, actualState);
     }
 
     @Override
     public boolean isDisabled() {
-        return disabled;
+        return state.isDisabled();
+    }
+
+    @Override
+    public boolean isMuted() {
+        return false;
+    }
+
+    @Override
+    public boolean isForceMuted() {
+        return false;
+    }
+
+    @Override
+    public boolean isForceDisabled() {
+        return false;
+    }
+
+    @Override
+    public void setMuted(boolean muted) {
+        // The legacy player-state packet has no microphone mute field.
+    }
+
+    @Override
+    public void evaluateForcedState() {
+        // Forced voice states are not represented by this protocol version.
+    }
+
+    @Override
+    public void evaluateVisibility() {
+        Server server = Voicechat.SERVER.getServer();
+        if (server == null) {
+            return;
+        }
+        PlayerState actualState = server.getPlayerStateManager().getState(state.getUuid());
+        if (actualState != null) {
+            server.getPlayerStateManager().broadcastState(serverPlayer, actualState);
+        }
     }
 
     @Override
@@ -157,8 +150,7 @@ public class VoicechatConnectionImpl implements VoicechatConnection {
             return;
         }
         PlayerStateManager manager = server.getPlayerStateManager();
-        manager.checkIfStateCanBeModified();
-        PlayerState actualState = manager.getState(serverPlayer.getUUID());
+        PlayerState actualState = manager.getState(state.getUuid());
         if (actualState == null) {
             return;
         }
@@ -166,35 +158,12 @@ public class VoicechatConnectionImpl implements VoicechatConnection {
             return;
         }
         actualState.setDisabled(disabled);
-        manager.broadcastState(serverPlayer, actualState);
-    }
-
-    @Override
-    public boolean isForceDisabled() {
-        return forceDisabled;
-    }
-
-    @Override
-    public void evaluateForcedState() {
-        Server server = Voicechat.SERVER.getServer();
-        if (server == null) {
-            return;
-        }
-        server.getPlayerStateManager().evaluateForcedState(serverPlayer);
-    }
-
-    @Override
-    public void evaluateVisibility() {
-        Server server = Voicechat.SERVER.getServer();
-        if (server == null) {
-            return;
-        }
-        server.getPlayerStateManager().evaluateVisibility(serverPlayer);
+        manager.broadcastState(null, actualState);
     }
 
     @Override
     public boolean isInstalled() {
-        return installed;
+        return Voicechat.SERVER.isCompatible(serverPlayer);
     }
 
     @Override
