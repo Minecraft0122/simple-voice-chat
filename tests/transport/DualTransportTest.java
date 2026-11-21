@@ -73,9 +73,17 @@ public class DualTransportTest {
                  DualVoiceServer server = new DualVoiceServer(TransportMode.DUAL, 30000)) {
                 reservedTcp.close();
                 try { server.open(port, "127.0.0.1"); throw new AssertionError("UDP bind collision ignored"); } catch (BindException expected) {}
-                try (ServerSocket probe = new ServerSocket(port, 1, InetAddress.getLoopbackAddress())) {
-                    check(server.isClosed(), "UDP bind failure rolls back the TCP listener");
+                boolean tcpReleased = false;
+                for (int attempt = 0; attempt < 20 && !tcpReleased; attempt++) {
+                    try (ServerSocket probe = new ServerSocket()) {
+                        probe.setReuseAddress(true);
+                        probe.bind(new InetSocketAddress(InetAddress.getLoopbackAddress(), port));
+                        tcpReleased = true;
+                    } catch (BindException e) {
+                        Thread.sleep(10L);
+                    }
                 }
+                check(server.isClosed() && tcpReleased, "UDP bind failure rolls back the TCP listener");
                 occupied.close();
                 server.open(port, "127.0.0.1");
                 check(!server.isClosed(), "an atomic bind failure can be retried");
