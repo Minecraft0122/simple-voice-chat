@@ -14,20 +14,14 @@ body:
         > [!IMPORTANT]  
         > Don't report any issues related to your voice chat not being connected.
         > Please visit the [Discord server](https://discord.gg/4dH2zwTmyX) for help with that issue.
-        
-        > [!IMPORTANT]  
-        > AI generated reports are not allowed and will be closed without response.
-        > If we invest the time to investigate and fix issues, you should at least write reports by hand.
   - type: checkboxes
-    id: confirmations
+    id: read_wiki
     attributes:
       label: Confirmation
       description: |
-        By submitting this issue, you confirm that you've read the [wiki](https://modrepo.de/minecraft/voicechat/wiki) and your issue is not listed there.
+        By submitting this issue, you confirm that vou've read the [wiki](https://modrepo.de/minecraft/voicechat/wiki) and your issue is not listed there.
       options:
         - label: I have read the wiki
-          required: true
-        - label: I didn't use AI to write this bug report
           required: true
   - type: textarea
     id: description
@@ -41,7 +35,7 @@ body:
     attributes:
       label: Minecraft version
       description: The Minecraft version you are using.
-      placeholder: "26.3"
+      placeholder: 1.20.4
     validations:
       required: true
   - type: input
@@ -49,7 +43,7 @@ body:
     attributes:
       label: Mod/Plugin version
       description: The version of the mod/plugin.
-      placeholder: 2.7.0+26.4
+      placeholder: 1.20.4-1.2.3
     validations:
       required: true
   - type: input
@@ -57,7 +51,7 @@ body:
     attributes:
       label: Mod/Plugin loader and version
       description: The mod/plugin loader and mod/plugin loader version you are using.
-      placeholder: Fabric Loader 0.19.2 / NeoForge 26.3.0.1 / Forge 66.1.2
+      placeholder: Fabric Loader 0.15.6 / NeoForge 20.4.1 / Forge 48.1.0
     validations:
       required: true
   - type: textarea

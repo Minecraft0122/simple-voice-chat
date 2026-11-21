@@ -5,14 +5,13 @@ import de.maxhenkel.voicechat.api.audiosender.AudioSender;
 import de.maxhenkel.voicechat.voice.common.MicPacket;
 import de.maxhenkel.voicechat.voice.server.Server;
 
+import java.util.HashMap;
 import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 
 public class AudioSenderImpl implements AudioSender {
 
-    private static final Map<UUID, AudioSenderImpl> AUDIO_SENDERS = new ConcurrentHashMap<>();
+    private static final Map<UUID, AudioSenderImpl> AUDIO_SENDERS = new HashMap<>();
 
     private final UUID uuid;
     private boolean whispering;
@@ -30,19 +29,11 @@ public class AudioSenderImpl implements AudioSender {
             return false;
         }
         AUDIO_SENDERS.put(audioSender.uuid, audioSender);
-        Server server = Voicechat.SERVER.getServer();
-        if (server != null) {
-            server.evaluateForcedState(audioSender.uuid);
-        }
         return true;
     }
 
     public static boolean unregisterAudioSender(AudioSenderImpl audioSender) {
-        return AUDIO_SENDERS.remove(audioSender.uuid, audioSender);
-    }
-
-    public static Set<UUID> getRegisteredPlayers() {
-        return AUDIO_SENDERS.keySet();
+        return AUDIO_SENDERS.remove(audioSender.uuid) != null;
     }
 
     @Override

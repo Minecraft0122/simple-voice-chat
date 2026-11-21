@@ -5,6 +5,7 @@ import de.maxhenkel.voicechat.Voicechat;
 import de.maxhenkel.voicechat.voice.client.ClientVoicechatConnection;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonInfo;
 import net.minecraft.client.server.IntegratedServer;
 import net.minecraft.network.Connection;
@@ -72,7 +73,7 @@ public class ForgeClientCompatibilityManager extends ClientCompatibilityManager 
     }
 
     public void onKey(InputEvent.Key event) {
-        keyboardEvents.forEach(keyboardEvent -> keyboardEvent.onKeyboardEvent(event.getInfo()));
+        keyboardEvents.forEach(keyboardEvent -> keyboardEvent.onKeyboardEvent(new KeyEvent(event.getKey(), event.getScanCode(), event.getModifiers())));
     }
 
     public void onMouse(InputEvent.MouseButton.Pre event) {

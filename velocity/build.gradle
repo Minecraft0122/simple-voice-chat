@@ -20,15 +20,10 @@ dependencies {
 }
 
 tasks.register('generateJava', Copy) {
-    def templateProperties = [
-            'mod_version'          : mod_version,
-            'compatibility_version': voicechat_compatibility_version
-    ]
-    // Trigger gradle regenerating the files in case something changes
-    inputs.properties(templateProperties)
     from project(':common-proxy').file('src/template/java')
     into "${layout.buildDirectory.asFile.get()}/generated/java"
-    expand templateProperties
+    expand 'mod_version': mod_version,
+            'compatibility_version': voicechat_compatibility_version
 }
 
 sourceSets.main.java {

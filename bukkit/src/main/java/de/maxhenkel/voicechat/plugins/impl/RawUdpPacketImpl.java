@@ -6,12 +6,16 @@ import java.net.SocketAddress;
 
 public class RawUdpPacketImpl implements RawUdpPacket {
 
+    private static final byte[] BUFFER = new byte[4096];
+
     private final byte[] data;
     private final SocketAddress socketAddress;
+    private final long timestamp;
 
-    public RawUdpPacketImpl(byte[] data, SocketAddress socketAddress) {
+    public RawUdpPacketImpl(byte[] data, SocketAddress socketAddress, long timestamp) {
         this.data = data;
         this.socketAddress = socketAddress;
+        this.timestamp = timestamp;
     }
 
     @Override
@@ -21,7 +25,7 @@ public class RawUdpPacketImpl implements RawUdpPacket {
 
     @Override
     public long getTimestamp() {
-        return 0L;
+        return timestamp;
     }
 
     @Override

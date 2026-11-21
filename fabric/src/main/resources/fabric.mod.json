@@ -25,9 +25,6 @@
     ],
     "modmenu": [
       "de.maxhenkel.voicechat.integration.ModMenu"
-    ],
-    "viafabric:via_api_initialized": [
-      "de.maxhenkel.voicechat.integration.ViaVersionCompatibility::onViaInitialized"
     ]
   },
   "mixins": [
@@ -45,8 +42,7 @@
     "viaversion": ">=${viaversion_version}"
   },
   "breaks": {
-    "fabric-api": "${fabric_api_dependency_breaks}",
-    "sound_physics_remastered": "<1.5.2"
+    "fabric-api": "${fabric_api_dependency_breaks}"
   },
   "custom": {
     "modmenu": {
@@ -59,7 +55,7 @@
         "allowed_clientbound": "voicechat:*",
         "allowed_serverbound": "voicechat:*",
         "clientbound_112_names": {
-          "voicechat:client_state": "vc:client_state",
+          "voicechat:update_state": "vc:update_state",
           "voicechat:request_secret": "vc:request_secret",
           "voicechat:create_group": "vc:create_group",
           "voicechat:set_group": "vc:set_group",

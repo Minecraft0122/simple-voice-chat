@@ -4,9 +4,6 @@ import de.maxhenkel.voicechat.Voicechat;
 import de.maxhenkel.voicechat.api.ClientVoicechatSocket;
 import de.maxhenkel.voicechat.api.events.*;
 import de.maxhenkel.voicechat.api.internal.events.*;
-import de.maxhenkel.voicechat.debug.CooldownTimer;
-import de.maxhenkel.voicechat.debug.netsim.NetworkSimulator;
-import de.maxhenkel.voicechat.debug.netsim.SimulatedClientVoicechatSocket;
 import de.maxhenkel.voicechat.plugins.impl.ClientVoicechatSocketImpl;
 import de.maxhenkel.voicechat.plugins.impl.PositionImpl;
 import de.maxhenkel.voicechat.plugins.impl.events.*;
@@ -41,21 +38,15 @@ public class ClientPluginManager {
     private final UpdateCameraPositionEventImpl cachedUpdateCameraPositionEvent = new UpdateCameraPositionEventImpl();
 
     public boolean shouldRenderPlayerIcons(UUID entityId, boolean disconnected) {
-        if (!pluginManager.hasListeners(NameTagIconRenderEvent.class)) {
-            return true;
-        }
         cachedNameTagIconRenderEvent.setEntityId(entityId);
         cachedNameTagIconRenderEvent.setDisconnected(disconnected);
         cachedNameTagIconRenderEvent.setCancelled(false);
-        return !pluginManager.dispatchEvent(NameTagIconRenderEvent.class, () -> cachedNameTagIconRenderEvent);
+        return !pluginManager.dispatchEvent(NameTagIconRenderEvent.class, cachedNameTagIconRenderEvent);
     }
 
     public boolean shouldRenderHudIcons() {
-        if (!pluginManager.hasListeners(HudIconRenderEvent.class)) {
-            return true;
-        }
         cachedHudIconRenderEvent.setCancelled(false);
-        return !pluginManager.dispatchEvent(HudIconRenderEvent.class, () -> cachedHudIconRenderEvent);
+        return !pluginManager.dispatchEvent(HudIconRenderEvent.class, cachedHudIconRenderEvent);
     }
 
     public ClientVoicechatSocket getClientSocketImplementation() {
@@ -66,7 +57,7 @@ public class ClientPluginManager {
             return new WebRTCVoicechatClientSocketImpl();
         }*/
         ClientVoicechatInitializationEventImpl event = new ClientVoicechatInitializationEventImpl();
-        pluginManager.dispatchEvent(ClientVoicechatInitializationEvent.class, () -> event);
+        pluginManager.dispatchEvent(ClientVoicechatInitializationEvent.class, event);
         ClientVoicechatSocket socket = event.getSocketImplementation();
         if (socket == null) {
             socket = new ClientVoicechatSocketImpl();
@@ -74,20 +65,13 @@ public class ClientPluginManager {
         } else {
             Voicechat.LOGGER.info("Using custom voicechat client socket implementation: {}", socket.getClass().getName());
         }
-        if (NetworkSimulator.isEnabled()) {
-            Voicechat.LOGGER.warn("Wrapping socket in development voicechat client socket for network condition testing");
-            socket = new SimulatedClientVoicechatSocket(socket);
-        }
         return socket;
     }
 
     @Nullable
     public short[] onMergeClientSound(@Nullable short[] rawAudio) {
-        if (!pluginManager.hasListeners(MergeClientSoundEvent.class)) {
-            return rawAudio;
-        }
         MergeClientSoundEventImpl event = new MergeClientSoundEventImpl();
-        pluginManager.dispatchEvent(MergeClientSoundEvent.class, () -> event);
+        pluginManager.dispatchEvent(MergeClientSoundEvent.class, event);
         List<short[]> audioToMerge = event.getAudioToMerge();
         if (audioToMerge == null) {
             return rawAudio;
@@ -100,11 +84,8 @@ public class ClientPluginManager {
 
     @Nullable
     public short[] onClientSound(short[] rawAudio, boolean whispering) {
-        if (!pluginManager.hasListeners(ClientSoundEvent.class)) {
-            return rawAudio;
-        }
         ClientSoundEventImpl clientSoundEvent = new ClientSoundEventImpl(rawAudio, whispering);
-        boolean cancelled = pluginManager.dispatchEvent(ClientSoundEvent.class, () -> clientSoundEvent);
+        boolean cancelled = pluginManager.dispatchEvent(ClientSoundEvent.class, clientSoundEvent);
         if (cancelled) {
             return null;
         }
@@ -112,48 +93,25 @@ public class ClientPluginManager {
     }
 
     public short[] onReceiveEntityClientSound(UUID id, UUID entity, short[] rawAudio, boolean whispering, float distance) {
-        if (!pluginManager.hasListeners(ClientReceiveSoundEvent.EntitySound.class)) {
-            return rawAudio;
-        }
         ClientReceiveSoundEventImpl.EntitySoundImpl clientSoundEvent = new ClientReceiveSoundEventImpl.EntitySoundImpl(id, entity, rawAudio, whispering, distance);
-        pluginManager.dispatchEvent(ClientReceiveSoundEvent.EntitySound.class, () -> clientSoundEvent);
-        return getValidRawAudio(clientSoundEvent, rawAudio);
+        pluginManager.dispatchEvent(ClientReceiveSoundEvent.EntitySound.class, clientSoundEvent);
+        return clientSoundEvent.getRawAudio();
     }
 
     public short[] onReceiveLocationalClientSound(UUID id, short[] rawAudio, Vec3 pos, float distance) {
-        if (!pluginManager.hasListeners(ClientReceiveSoundEvent.LocationalSound.class)) {
-            return rawAudio;
-        }
         ClientReceiveSoundEventImpl.LocationalSoundImpl clientSoundEvent = new ClientReceiveSoundEventImpl.LocationalSoundImpl(id, rawAudio, new PositionImpl(pos), distance);
-        pluginManager.dispatchEvent(ClientReceiveSoundEvent.LocationalSound.class, () -> clientSoundEvent);
-        return getValidRawAudio(clientSoundEvent, rawAudio);
+        pluginManager.dispatchEvent(ClientReceiveSoundEvent.LocationalSound.class, clientSoundEvent);
+        return clientSoundEvent.getRawAudio();
     }
 
     public short[] onReceiveStaticClientSound(UUID id, short[] rawAudio) {
-        if (!pluginManager.hasListeners(ClientReceiveSoundEvent.StaticSound.class)) {
-            return rawAudio;
-        }
         ClientReceiveSoundEventImpl.StaticSoundImpl clientSoundEvent = new ClientReceiveSoundEventImpl.StaticSoundImpl(id, rawAudio);
-        pluginManager.dispatchEvent(ClientReceiveSoundEvent.StaticSound.class, () -> clientSoundEvent);
-        return getValidRawAudio(clientSoundEvent, rawAudio);
-    }
-
-    private static short[] getValidRawAudio(ClientReceiveSoundEventImpl event, short[] rawAudio) {
-        short[] processedAudio = event.getRawAudio();
-        if (processedAudio == null) {
-            return new short[0];
-        }
-        if (processedAudio.length != 0 && processedAudio.length != AudioUtils.FRAME_SIZE) {
-            CooldownTimer.run("receive_sound_frame_size", () -> {
-                Voicechat.LOGGER.error("Got invalid audio frame size {}!={}", processedAudio.length, AudioUtils.FRAME_SIZE);
-            });
-            return rawAudio;
-        }
-        return processedAudio;
+        pluginManager.dispatchEvent(ClientReceiveSoundEvent.StaticSound.class, clientSoundEvent);
+        return clientSoundEvent.getRawAudio();
     }
 
     public void onALSound(int source, @Nullable UUID channelId, @Nullable Vec3 pos, @Nullable String category, Class<? extends OpenALSoundEvent> eventClass) {
-        pluginManager.dispatchEvent(eventClass, () -> new OpenALSoundEventImpl(
+        pluginManager.dispatchEvent(eventClass, new OpenALSoundEventImpl(
                 channelId,
                 pos == null ? null : new PositionImpl(pos),
                 category,
@@ -162,14 +120,14 @@ public class ClientPluginManager {
     }
 
     public void onCreateALContext(long context, long device) {
-        pluginManager.dispatchEvent(CreateOpenALContextEvent.class, () -> new CreateOpenALContextEventImpl(
+        pluginManager.dispatchEvent(CreateOpenALContextEvent.class, new CreateOpenALContextEventImpl(
                 context,
                 device
         ));
     }
 
     public void onDestroyALContext(long context, long device) {
-        pluginManager.dispatchEvent(DestroyOpenALContextEvent.class, () -> new DestroyOpenALContextEventImpl(
+        pluginManager.dispatchEvent(DestroyOpenALContextEvent.class, new DestroyOpenALContextEventImpl(
                 context,
                 device
         ));
@@ -177,19 +135,16 @@ public class ClientPluginManager {
 
     public boolean shouldForceShowIcons() {
         ForceShowIconsEventImpl event = new ForceShowIconsEventImpl();
-        pluginManager.dispatchEvent(ForceShowIconsEvent.class, () -> event);
+        pluginManager.dispatchEvent(ForceShowIconsEvent.class, event);
         return event.shouldForceShow();
     }
 
     @Nullable
     public CameraState onUpdateCameraPosition() {
-        if (!pluginManager.hasListeners(UpdateCameraPositionEvent.class)) {
-            return null;
-        }
         cachedUpdateCameraPositionEvent.setPos(null);
         cachedUpdateCameraPositionEvent.getForward().set(0F);
         cachedUpdateCameraPositionEvent.getUp().set(0F);
-        pluginManager.dispatchEvent(UpdateCameraPositionEvent.class, () -> cachedUpdateCameraPositionEvent);
+        pluginManager.dispatchEvent(UpdateCameraPositionEvent.class, cachedUpdateCameraPositionEvent);
         if (cachedUpdateCameraPositionEvent.getPos() == null) {
             return null;
         }
@@ -209,24 +164,12 @@ public class ClientPluginManager {
      * @return if the event was canceled
      */
     public boolean onStartMic() {
-        return pluginManager.dispatchEvent(StartMicEvent.class, StartMicEventImpl::new);
-    }
-
-    public void onVoicechatConnection(boolean connected) {
-        pluginManager.dispatchEvent(ClientVoicechatConnectionEvent.class, () -> new ClientVoicechatConnectionEventImpl(connected));
-    }
-
-    public void onVoicechatDisable(boolean disabled) {
-        pluginManager.dispatchEvent(VoicechatDisableEvent.class, () -> new VoicechatDisableEventImpl(disabled));
-    }
-
-    public void onMicrophoneMute(boolean muted) {
-        pluginManager.dispatchEvent(MicrophoneMuteEvent.class, () -> new MicrophoneMuteEventImpl(muted));
+        return pluginManager.dispatchEvent(StartMicEvent.class, new StartMicEventImpl());
     }
 
     public long getAlcContext(long originalContext) {
         AlcContextEventImpl event = new AlcContextEventImpl(originalContext);
-        pluginManager.dispatchEvent(AlcContextEvent.class, () -> event);
+        pluginManager.dispatchEvent(AlcContextEvent.class, event);
         return event.getContext();
     }
 

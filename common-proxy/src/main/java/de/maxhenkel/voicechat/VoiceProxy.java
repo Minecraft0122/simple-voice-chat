@@ -157,9 +157,8 @@ public abstract class VoiceProxy {
      * @param playerUUID The UUID of the player that disconnected from a backend server
      */
     protected void onPlayerServerDisconnected(UUID playerUUID) {
-        // The sniffed state has to be removed first, so no new bridge can be created after the old one was interrupted
-        voiceProxySniffer.onPlayerServerDisconnect(playerUUID);
         disconnectBridge(playerUUID);
+        voiceProxySniffer.onPlayerServerDisconnect(playerUUID);
         getLogger().debug("Player {} has disconnected from backend server, interrupting bridge if it exists", playerUUID);
     }
 

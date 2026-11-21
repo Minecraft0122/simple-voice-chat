@@ -3,13 +3,11 @@ package de.maxhenkel.voicechat.voice.client;
 import de.maxhenkel.voicechat.Voicechat;
 import de.maxhenkel.voicechat.VoicechatClient;
 import de.maxhenkel.voicechat.debug.DebugOverlay;
-import de.maxhenkel.voicechat.gui.onboarding.OnboardingManager;
 import de.maxhenkel.voicechat.intercompatibility.ClientCompatibilityManager;
 import de.maxhenkel.voicechat.intercompatibility.CommonCompatibilityManager;
 import de.maxhenkel.voicechat.macos.PermissionCheck;
 import de.maxhenkel.voicechat.macos.VersionCheck;
 import de.maxhenkel.voicechat.macos.avfoundation.AVAuthorizationStatus;
-import de.maxhenkel.voicechat.natives.ClientNativeManager;
 import de.maxhenkel.voicechat.net.ClientServerNetManager;
 import de.maxhenkel.voicechat.net.RequestSecretPacket;
 import de.maxhenkel.voicechat.net.SecretPacket;
@@ -61,7 +59,6 @@ public class ClientManager {
         ClientCompatibilityManager.INSTANCE.onJoinWorld(this::onJoinWorld);
         ClientCompatibilityManager.INSTANCE.onDisconnect(this::onDisconnect);
         ClientCompatibilityManager.INSTANCE.onPublishServer(this::onPublishServer);
-        ClientCompatibilityManager.INSTANCE.onClientTick(this::onClientTick);
 
         ClientCompatibilityManager.INSTANCE.onVoiceChatConnected(connection -> {
             if (client != null) {
@@ -108,13 +105,6 @@ public class ClientManager {
             return;
         }
         Voicechat.LOGGER.info("Received secret");
-        if (!serverCompatible) {
-            serverCompatible = true;
-            // Only ever call once for a world
-            OnboardingManager.onJoinWorld();
-            ClientNativeManager.onJoinWorld();
-        }
-        playerStateManager.syncOwnState();
         if (client.getConnection() != null) {
             ClientCompatibilityManager.INSTANCE.emitVoiceChatDisconnectedEvent();
         }
@@ -144,7 +134,6 @@ public class ClientManager {
     }
 
     private void onJoinWorld() {
-        serverCompatible = false;
         if (VoicechatClient.CLIENT_CONFIG.muteOnJoin.get()) {
             playerStateManager.setMuted(true);
         }
@@ -210,18 +199,11 @@ public class ClientManager {
     }
 
     private void onDisconnect() {
-        serverCompatible = false;
         if (client != null) {
             client.close();
             client = null;
         }
         ClientCompatibilityManager.INSTANCE.emitVoiceChatDisconnectedEvent();
-    }
-
-    private void onClientTick() {
-        if (client != null) {
-            client.tick();
-        }
     }
 
     private void onPublishServer(int port) {
@@ -233,19 +215,13 @@ public class ClientManager {
         // and existing connections when publishing the world to LAN.
         Voicechat.LOGGER.info("LAN voice chat uses TCP port {} (Minecraft port {})", server.getPort(), port);
         Component portComponent = ComponentUtils.copyOnClickText(String.valueOf(server.getPort()));
-        ChatUtils.sendPlayerMessage(Component.translatable("message.voicechat.server_port", portComponent));
+        Minecraft mc = Minecraft.getInstance();
+        mc.execute(() -> mc.gui.hud.getChat().addClientSystemMessage(Component.translatable("message.voicechat.server_port", portComponent)));
     }
 
     @Nullable
     public static ClientVoicechat getClient() {
         return instance().client;
-    }
-
-    /**
-     * The server only sends the secret to clients with a matching compatibility version
-     */
-    public static boolean isServerCompatible() {
-        return instance().serverCompatible;
     }
 
     public static ClientPlayerStateManager getPlayerStateManager() {

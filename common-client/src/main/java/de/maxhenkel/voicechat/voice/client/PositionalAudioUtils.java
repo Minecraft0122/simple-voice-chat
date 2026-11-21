@@ -22,7 +22,7 @@ public class PositionalAudioUtils {
         Vec2 diff = new Vec2((float) d.x, (float) d.z);
         float diffAngle = Utils.angle(diff, new Vec2(-1F, 0F));
         float angle = Utils.normalizeAngle(diffAngle - (yRot % 360F));
-        float dif = Math.min((float) (Math.abs(cameraPos.y - soundPos.y) / 32), 1F);
+        float dif = (float) (Math.abs(cameraPos.y - soundPos.y) / 32);
 
         float rot = angle / 180F;
         float perc = rot;
@@ -81,7 +81,6 @@ public class PositionalAudioUtils {
 
     /**
      * Converts 16 bit mono audio to stereo based on the sound position
-     * The channels are scaled to constant power, to match the loudness of mono sources panned by OpenAL
      * This does not include the volume based on distance
      *
      * @param audio    the audio data
@@ -89,9 +88,10 @@ public class PositionalAudioUtils {
      * @return the stereo audio data
      */
     public static short[] convertToStereo(short[] audio, @Nullable Vec3 soundPos) {
-        float[] volumes = soundPos == null ? new float[]{1F, 1F} : getStereoVolume(soundPos);
-        float power = (float) Math.sqrt(volumes[0] * volumes[0] + volumes[1] * volumes[1]);
-        return convertToStereo(audio, volumes[0] / power, volumes[1] / power);
+        if (soundPos == null) {
+            return convertToStereo(audio);
+        }
+        return convertToStereo(audio, getStereoVolume(soundPos));
     }
 
     /**

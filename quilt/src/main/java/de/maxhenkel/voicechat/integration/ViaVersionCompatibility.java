@@ -1,6 +1,5 @@
 package de.maxhenkel.voicechat.integration;
 
-import com.viaversion.viaversion.api.Via;
 import de.maxhenkel.voicechat.Voicechat;
 import de.maxhenkel.voicechat.intercompatibility.CommonCompatibilityManager;
 import de.maxhenkel.voicechat.net.QuiltNetManager;
@@ -14,26 +13,9 @@ public class ViaVersionCompatibility {
 
     private static final String OLD_VOICECHAT_PREFIX = "vc";
 
-    private static boolean voicechatInitialized;
-
-    public static void onVoicechatInitialized() {
-        voicechatInitialized = true;
-        register();
-    }
-
-    /**
-     * Ran by <code>viafabric:via_api_initialized</code> entrypoint.
-     * In case this runs before VC init, it gets skipped and register gets run by us.
-     */
-    public static void onViaInitialized() {
-        if (voicechatInitialized) {
-            register();
-        }
-    }
-
-    private static void register() {
+    public static void register() {
         try {
-            if (QuiltLoader.isModLoaded("viaversion") && Via.isLoaded()) {
+            if (QuiltLoader.isModLoaded("viaversion")) {
                 registerMappings();
                 Voicechat.LOGGER.info("Successfully registered ViaVersion mappings");
             }

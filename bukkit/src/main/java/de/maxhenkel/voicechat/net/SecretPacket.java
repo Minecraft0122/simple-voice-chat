@@ -4,7 +4,6 @@ import de.maxhenkel.voicechat.Voicechat;
 import de.maxhenkel.voicechat.config.ServerConfig;
 import de.maxhenkel.voicechat.util.FriendlyByteBuf;
 import de.maxhenkel.voicechat.util.Key;
-import de.maxhenkel.voicechat.voice.common.AudioUtils;
 import de.maxhenkel.voicechat.voice.common.Secret;
 import org.bukkit.entity.Player;
 
@@ -15,7 +14,6 @@ public class SecretPacket implements Packet<SecretPacket> {
     public static final Key SECRET = Voicechat.compatibility.createNamespacedKey("secret");
 
     private Secret secret;
-    private UUID connectionId;
     private int serverPort;
     private UUID playerUUID;
     private ServerConfig.Codec codec;
@@ -43,7 +41,6 @@ public class SecretPacket implements Packet<SecretPacket> {
 
     public SecretPacket(Player player, Secret secret, int port, ServerConfig serverConfig, String voiceHost, int transportProtocol) {
         this.secret = secret;
-        this.connectionId = connectionId;
         this.serverPort = port;
         this.playerUUID = player.getUniqueId();
         this.codec = serverConfig.voiceChatCodec.get();
@@ -58,10 +55,6 @@ public class SecretPacket implements Packet<SecretPacket> {
 
     public Secret getSecret() {
         return secret;
-    }
-
-    public UUID getConnectionId() {
-        return connectionId;
     }
 
     public int getServerPort() {
@@ -110,11 +103,10 @@ public class SecretPacket implements Packet<SecretPacket> {
     @Override
     public SecretPacket fromBytes(FriendlyByteBuf buf) {
         secret = Secret.fromBytes(buf);
-        connectionId = buf.readUUID();
         serverPort = buf.readInt();
         playerUUID = buf.readUUID();
         codec = ServerConfig.Codec.values()[buf.readByte()];
-        mtuSize = Math.max(AudioUtils.MIN_MTU_SIZE, Math.min(buf.readInt(), AudioUtils.MAX_MTU_SIZE));
+        mtuSize = buf.readInt();
         voiceChatDistance = buf.readDouble();
         keepAlive = buf.readInt();
         groupsEnabled = buf.readBoolean();
@@ -127,7 +119,6 @@ public class SecretPacket implements Packet<SecretPacket> {
     @Override
     public void toBytes(FriendlyByteBuf buf) {
         secret.toBytes(buf);
-        buf.writeUUID(connectionId);
         buf.writeInt(serverPort);
         buf.writeUUID(playerUUID);
         buf.writeByte(codec.ordinal());

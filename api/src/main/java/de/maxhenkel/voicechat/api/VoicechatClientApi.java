@@ -12,68 +12,24 @@ import java.util.UUID;
 public interface VoicechatClientApi extends VoicechatApi {
 
     /**
-     * Does the same as {@link #isMuted(UUID)} with <code>null</code> as the player UUID.
-     *
-     * @return if the local player has muted their microphone or has been force muted
+     * @return if the local voice chat is muted
      */
-    default boolean isMuted() {
-        return isMuted(null);
-    }
-
-    /**
-     * This also returns <code>true</code> if the microphone has been force muted by the server. See {@link #isForceMuted(UUID)}.
-     *
-     * @param playerId the UUID of the player or <code>null</code> for the local player
-     * @return if the player with the provided UUID has muted their microphone
-     */
-    boolean isMuted(@Nullable UUID playerId);
-
-    /**
-     * Does the same as {@link #isForceMuted(UUID)} with <code>null</code> as the player UUID.
-     *
-     * @return if the microphone of the local player has been force muted by the server
-     */
-    default boolean isForceMuted() {
-        return isForceMuted(null);
-    }
-
-    /**
-     * @param playerId the UUID of the player or <code>null</code> for the local player
-     * @return if the microphone of the player with the provided UUID has been force muted by the server
-     */
-    boolean isForceMuted(@Nullable UUID playerId);
+    boolean isMuted();
 
     /**
      * Does the same as {@link #isDisabled(UUID)} with <code>null</code> as the player UUID.
      *
-     * @return if the local voice chat is disabled or has been force disabled
+     * @return if the local voice chat is disabled
      */
     default boolean isDisabled() {
         return isDisabled(null);
     }
 
     /**
-     * This also returns <code>true</code> if the voice chat has been force disabled by the server. See {@link #isForceDisabled(UUID)}.
-     *
      * @param playerId the UUID of the player or <code>null</code> for the local player
      * @return if the player with the provided UUID has the voice chat disabled
      */
     boolean isDisabled(@Nullable UUID playerId);
-
-    /**
-     * Does the same as {@link #isForceDisabled(UUID)} with <code>null</code> as the player UUID.
-     *
-     * @return if the voice chat of the local player has been force disabled by the server
-     */
-    default boolean isForceDisabled() {
-        return isForceDisabled(null);
-    }
-
-    /**
-     * @param playerId the UUID of the player or <code>null</code> for the local player
-     * @return if the voice chat of the player with the provided UUID has been force disabled by the server
-     */
-    boolean isForceDisabled(@Nullable UUID playerId);
 
     /**
      * Does the same as {@link #isDisconnected(UUID)} with <code>null</code> as the player UUID.
@@ -148,8 +104,8 @@ public interface VoicechatClientApi extends VoicechatApi {
     /**
      * Creates a client side entity audio channel.
      *
-     * @param uuid   the ID of the channel
-     * @param entity the entity to attach the channel to
+     * @param uuid   the UUID of the entity
+     * @param entity the entity
      * @return the audio channel
      */
     ClientEntityAudioChannel createEntityAudioChannel(UUID uuid, Entity entity);

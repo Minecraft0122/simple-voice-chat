@@ -9,7 +9,7 @@ public class QuiltVoicechatMod extends Voicechat implements ModInitializer {
     @Override
     public void onInitialize() {
         initialize();
-        ViaVersionCompatibility.onVoicechatInitialized();
+        ViaVersionCompatibility.register();
         VanishIntegration.init();
     }
 

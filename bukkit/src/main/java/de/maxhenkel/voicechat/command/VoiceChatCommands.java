@@ -223,7 +223,7 @@ public class VoiceChatCommands implements CommandExecutor, TabCompleter {
             return true;
         }
 
-        String passwordSuffix = group.getPassword() == null ? "" : String.format(" \"%s\"", group.getPassword().replace("\\", "\\\\").replace("\"", "\\\""));
+        String passwordSuffix = group.getPassword() == null ? "" : " \"" + group.getPassword() + "\"";
         String cmd = "/voicechat join " + group.getId().toString() + passwordSuffix;
         Voicechat.compatibility.sendInviteMessage(player, commandSender, group.getName(), cmd);
 
@@ -233,62 +233,58 @@ public class VoiceChatCommands implements CommandExecutor, TabCompleter {
     }
 
     private boolean joinCommand(Player commandSender, Command command, String label, String[] args) {
-        String input = String.join(" ", Arrays.copyOfRange(args, 1, args.length)).trim();
-        if (input.isEmpty()) {
+        if (args.length < 2) {
             return false;
         }
 
+        int argIndex = 1;
         UUID groupUUID;
-        int groupEnd;
-        if (input.startsWith("\"")) {
-            StringBuilder groupName = new StringBuilder();
-            groupEnd = readQuoted(input, groupName);
-            groupUUID = getGroupUUID(commandSender, Voicechat.SERVER.getServer(), groupName.toString());
-        } else {
-            groupEnd = input.indexOf(' ');
-            if (groupEnd < 0) {
-                groupEnd = input.length();
+        try {
+            groupUUID = UUID.fromString(args[argIndex]);
+        } catch (Exception e) {
+            String groupName;
+            if (args[argIndex].startsWith("\"")) {
+                StringBuilder sb = new StringBuilder();
+                for (; argIndex < args.length; argIndex++) {
+                    sb.append(args[argIndex]).append(" ");
+                    if (args[argIndex].endsWith("\"") && !args[argIndex].endsWith("\\\"")) {
+                        break;
+                    }
+                }
+                groupName = sb.toString().trim();
+                String[] split = groupName.split("\"");
+                if (split.length > 1) {
+                    groupName = split[1];
+                }
+            } else {
+                groupName = args[argIndex];
             }
-            String group = input.substring(0, groupEnd);
-            try {
-                groupUUID = UUID.fromString(group);
-            } catch (Exception e) {
-                groupUUID = getGroupUUID(commandSender, Voicechat.SERVER.getServer(), group);
-            }
+            groupUUID = getGroupUUID(commandSender, Voicechat.SERVER.getServer(), groupName);
         }
 
         if (groupUUID == null) {
             return true;
         }
 
-        String rest = input.substring(groupEnd).trim();
+        argIndex++;
+
         String password = null;
-        if (rest.startsWith("\"")) {
+        if (args.length >= argIndex + 1) {
             StringBuilder sb = new StringBuilder();
-            readQuoted(rest, sb);
-            password = sb.toString();
-        } else if (!rest.isEmpty()) {
-            password = rest;
+            for (; argIndex < args.length; argIndex++) {
+                sb.append(args[argIndex]).append(" ");
+            }
+            password = sb.toString().trim();
+            if (password.startsWith("\"")) {
+                String[] split = password.split("\"");
+                if (split.length > 1) {
+                    password = split[1];
+                }
+            }
         }
 
         joinGroup(commandSender, groupUUID, password);
         return true;
-    }
-
-    private static int readQuoted(String input, StringBuilder value) {
-        int i = 1;
-        for (; i < input.length(); i++) {
-            char c = input.charAt(i);
-            if (c == '"') {
-                return i + 1;
-            }
-            if (c == '\\' && i + 1 < input.length()) {
-                i++;
-                c = input.charAt(i);
-            }
-            value.append(c);
-        }
-        return i;
     }
 
     private UUID getGroupUUID(Player commandSender, Server server, String groupName) {

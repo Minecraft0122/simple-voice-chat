@@ -1,31 +1,3 @@
-- Added server-side force muting
-- Added server-side force disabling
-- Make `voicechat.speak` permission use force muting
-- Make `voicechat.listen` permission use force disabling
-- Make force muting and force disabling available in the API
-- New force mute and force disable icons that are shown above other players and in the HUD
-- Allow muting when using push to talk
-- Sync mute state to other players
-- Show above other players if they are muted
-- Fixed onboarding volume testing bar being broken on wide screens
-- Separate players and other volumes into separate tabs in the adjust volumes screen
-- Allow nesting volume categories using the API
-- Improved voice chat initialization protocol to prevent potential attacks
-- Prevent incompatible clients from receiving/sending their states to the server
-- Allow addons to hide players from other players using the API
-- Added `packet_queue_size` config option
-- Kick players if they send malformed packets
-- Properly prevent players from leaving groups using the API
-- Always call leave group event when a player changes their group
-- Added UDP packet rate limiting
-- Fixed voice chat getting stuck and spamming errors after a connection timeout
-- Fixed closing the microphone potentially freezing the game for a moment
-- Voice chat now retries connecting if the connection fails during setup, instead of staying disconnected until rejoining
-- Show an error message when the speaker or microphone gets disconnected
-- Fixed the game freezing while resolving the voice chat server's hostname
-- Reduced potential log spam caused by OpenAL errors
-- Added support for switching or disconnecting audio devices on the fly
-- Fixed some systems breaking when the system time changes
-- Fixed recordings drift apart with real time
-- Fixed speaker icon flashing after stopping to whisper
-- Fixed "Other" volume category not working
+- Ignore `voice_host` in singleplayer and LAN worlds
+- Improved sound manager error messages
+- Added Thai translation

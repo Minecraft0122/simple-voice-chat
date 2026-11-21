@@ -4,7 +4,6 @@ import de.maxhenkel.voicechat.VoicechatClient;
 import de.maxhenkel.voicechat.voice.client.ChatUtils;
 import de.maxhenkel.voicechat.voice.client.ClientManager;
 import de.maxhenkel.voicechat.voice.client.KeyEvents;
-import de.maxhenkel.voicechat.voice.client.MicrophoneActivationType;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.Screen;
@@ -29,15 +28,14 @@ public class OnboardingManager {
     }
 
     public static void finishOnboarding() {
-        boolean voiceActivation = VoicechatClient.CLIENT_CONFIG.microphoneActivationType.get().equals(MicrophoneActivationType.VOICE);
-        VoicechatClient.CLIENT_CONFIG.muted.set(voiceActivation).save();
+        VoicechatClient.CLIENT_CONFIG.muted.set(true).save();
         VoicechatClient.CLIENT_CONFIG.disabled.set(false).save();
         VoicechatClient.CLIENT_CONFIG.onboardingFinished.set(true).save();
         ClientManager.getPlayerStateManager().onFinishOnboarding();
         MC.gui.setScreen(null);
     }
 
-    public static void onJoinWorld() {
+    public static void onConnecting() {
         if (!isOnboarding()) {
             return;
         }

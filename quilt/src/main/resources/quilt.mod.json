@@ -40,9 +40,6 @@
       ],
       "modmenu": [
         "de.maxhenkel.voicechat.integration.ModMenu"
-      ],
-      "viafabric:via_api_initialized": [
-        "de.maxhenkel.voicechat.integration.ViaVersionCompatibility::onViaInitialized"
       ]
     },
     "depends": [
@@ -63,10 +60,6 @@
       {
         "id": "fabric-api",
         "versions": "${fabric_api_dependency_breaks}"
-      },
-      {
-        "id": "sound_physics_remastered",
-        "versions": "<1.5.2"
       }
     ]
   },
@@ -83,7 +76,7 @@
       "allowed_clientbound": "voicechat:*",
       "allowed_serverbound": "voicechat:*",
       "clientbound_112_names": {
-        "voicechat:client_state": "vc:client_state",
+        "voicechat:update_state": "vc:update_state",
         "voicechat:request_secret": "vc:request_secret",
         "voicechat:create_group": "vc:create_group",
         "voicechat:set_group": "vc:set_group",

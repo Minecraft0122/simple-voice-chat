@@ -41,12 +41,8 @@ public class ChatUtils {
                 .append(message);
     }
 
-    /**
-     * Must not be called from the main thread. This will ensure its on the main thread
-     */
     public static void sendPlayerMessage(Component component) {
-        Minecraft mc = Minecraft.getInstance();
-        mc.execute(() -> mc.gui.hud.getChat().addClientSystemMessage(component));
+        Minecraft.getInstance().gui.hud.getChat().addClientSystemMessage(component);
     }
 
 }

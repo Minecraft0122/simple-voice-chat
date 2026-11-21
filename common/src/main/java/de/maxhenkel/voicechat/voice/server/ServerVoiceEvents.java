@@ -4,16 +4,15 @@ import de.maxhenkel.voicechat.BuildConstants;
 import de.maxhenkel.voicechat.voice.transport.VoiceProtocol;
 import de.maxhenkel.voicechat.voice.transport.TransportMode;
 import de.maxhenkel.voicechat.Voicechat;
-import de.maxhenkel.voicechat.debug.CooldownTimer;
 import de.maxhenkel.voicechat.intercompatibility.CommonCompatibilityManager;
 import de.maxhenkel.voicechat.intercompatibility.CrossSideManager;
-import de.maxhenkel.voicechat.legacy.LegacyCompatibility;
 import de.maxhenkel.voicechat.net.NetManager;
 import de.maxhenkel.voicechat.net.PacketRateLimiter;
 import de.maxhenkel.voicechat.net.SecretPacket;
 import de.maxhenkel.voicechat.net.VersionPacket;
 import de.maxhenkel.voicechat.voice.transport.VoiceVersion;
 import de.maxhenkel.voicechat.plugins.PluginManager;
+import de.maxhenkel.voicechat.voice.common.Secret;
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
@@ -136,19 +135,13 @@ public class ServerVoiceEvents {
         if (server == null) {
             return;
         }
-        ConnectionSecret connectionSecret = server.getConnectionSecrets().create(player.getUUID());
-        if (connectionSecret == null) {
-            if (Voicechat.debugMode()) {
-                Voicechat.LOGGER.warn("Player {} already requested secret - ignoring", player.getName().getString());
-            } else {
-                CooldownTimer.run(String.format("already_requested_secret_%s", player.getUUID()), () -> {
-                    Voicechat.LOGGER.warn("Player {} already requested secret - ignoring", player.getName().getString());
-                });
-            }
+        CommonCompatibilityManager.INSTANCE.emitPlayerCompatibilityCheckSucceeded(player);
+
+        Secret secret = server.generateNewSecret(player.getUUID());
+        if (secret == null) {
+            Voicechat.LOGGER.warn("Player already requested secret - ignoring");
             return;
         }
-
-        CommonCompatibilityManager.INSTANCE.emitPlayerCompatibilityCheckSucceeded(player);
 
         // TODO Add back when they re-add P2P
         // Only does something if hosting P2P

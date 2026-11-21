@@ -81,8 +81,6 @@ public interface Group {
         Builder setName(String name);
 
         /**
-         * Can't be longer than 256 characters.
-         *
          * @param password the group password
          * @return the builder
          */
@@ -108,7 +106,7 @@ public interface Group {
 
         /**
          * @return the built group
-         * @throws IllegalStateException if the name is not set or invalid or the password is too long
+         * @throws IllegalStateException if the name is not set or invalid
          */
         Group build();
 
