@@ -2,7 +2,6 @@ package de.maxhenkel.voicechat.net;
 
 import de.maxhenkel.voicechat.Voicechat;
 import de.maxhenkel.voicechat.intercompatibility.CommonCompatibilityManager;
-import de.maxhenkel.voicechat.legacy.LegacyCompatibility;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 
@@ -32,12 +31,6 @@ public class Channel<T extends Packet<T>> {
             if (!player.connection.isAcceptingMessages()) return;
             if (serverListener != null) serverListener.onPacket(player, packet);
         }, () -> {});
-    }
-
-    public void notifyServerListener(ServerPlayer player, T packet) {
-        if (serverListener != null) {
-            serverListener.onPacket(player, packet);
-        }
     }
 
 }

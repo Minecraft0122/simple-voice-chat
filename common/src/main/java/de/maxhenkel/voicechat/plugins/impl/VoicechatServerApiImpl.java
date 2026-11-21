@@ -236,11 +236,7 @@ public class VoicechatServerApiImpl extends VoicechatApiImpl implements Voicecha
         if (server == null) {
             return null;
         }
-        de.maxhenkel.voicechat.voice.server.Group group = server.getGroupManager().getGroup(groupId);
-        if (group == null) {
-            return null;
-        }
-        return new GroupImpl(group);
+        return new GroupImpl(server.getGroupManager().getGroup(groupId));
     }
 
     @Override
