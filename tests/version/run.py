@@ -95,9 +95,6 @@ public class VersionTest {
  }
 }'''.replace('BUF',buf).replace('PLAYER',player))
     sources += [str(production/'net'/f'{name}.java') for name in ('Packet','RequestSecretPacket','SecretPacket','VersionPacket')]
-    audio_utils = production/'voice/common/AudioUtils.java'
-    if audio_utils.exists():
-        sources.append(str(audio_utils))
     transport = root / 'common/src/main/java/de/maxhenkel/voicechat/voice/transport'
     sources += [str(transport/f'{name}.java') for name in ('VoiceVersion','VoiceProtocol','VoiceEndpoint','TransportMode')]
     subprocess.run(['javac','--release','25','-encoding','UTF-8','-d',str(out),*sources],check=True)

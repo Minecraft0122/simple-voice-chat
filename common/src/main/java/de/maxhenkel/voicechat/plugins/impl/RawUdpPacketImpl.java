@@ -8,16 +8,10 @@ public class RawUdpPacketImpl implements RawUdpPacket {
 
     private final byte[] data;
     private final SocketAddress socketAddress;
-    private final long timestamp;
 
     public RawUdpPacketImpl(byte[] data, SocketAddress socketAddress) {
-        this(data, socketAddress, System.currentTimeMillis());
-    }
-
-    public RawUdpPacketImpl(byte[] data, SocketAddress socketAddress, long timestamp) {
         this.data = data;
         this.socketAddress = socketAddress;
-        this.timestamp = timestamp;
     }
 
     @Override
@@ -27,7 +21,7 @@ public class RawUdpPacketImpl implements RawUdpPacket {
 
     @Override
     public long getTimestamp() {
-        return timestamp;
+        return 0L;
     }
 
     @Override
