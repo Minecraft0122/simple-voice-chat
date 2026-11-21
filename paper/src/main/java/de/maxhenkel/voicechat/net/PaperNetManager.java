@@ -5,6 +5,7 @@ import de.maxhenkel.voicechat.Voicechat;
 import de.maxhenkel.voicechat.VoicechatPaperPlugin;
 import io.netty.buffer.Unpooled;
 import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.common.ClientboundCustomPayloadPacket;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.network.protocol.common.custom.DiscardedPayload;
@@ -33,21 +34,23 @@ public class PaperNetManager extends NetManager {
         try {
             T dummyPacket = packetType.getDeclaredConstructor().newInstance();
             CustomPacketPayload.Type<T> type = dummyPacket.type();
+            packets.add(type.id());
             String packetId = type.id().toString();
             if (toServer) {
                 Bukkit.getMessenger().registerIncomingPluginChannel(VoicechatPaperPlugin.INSTANCE, packetId, (s, player, bytes) -> {
+                    ServerPlayer serverPlayer = BukkitUtils.getPlayer(player);
                     try {
                         T packet = packetType.getDeclaredConstructor().newInstance();
                         FriendlyByteBuf buffer = new FriendlyByteBuf(Unpooled.wrappedBuffer(bytes));
 
                         packet.fromBytes(buffer);
-                        ServerPlayer serverPlayer = BukkitUtils.getPlayer(player);
                         if (!Voicechat.SERVER.isCompatible(serverPlayer) && !packetType.equals(RequestSecretPacket.class)) {
                             return;
                         }
                         c.onServerPacket(serverPlayer, packet);
                     } catch (Exception e) {
-                        Voicechat.LOGGER.error("Failed to read packet", e);
+                        Voicechat.LOGGER.debug("Failed to parse packet", e);
+                        serverPlayer.connection.disconnect(Component.translatable("disconnect.genericReason", "Failed to parse packet"));
                     }
                 });
             }

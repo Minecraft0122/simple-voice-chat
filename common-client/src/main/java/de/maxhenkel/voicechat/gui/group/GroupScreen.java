@@ -8,13 +8,13 @@ import de.maxhenkel.voicechat.gui.VoiceChatScreenBase;
 import de.maxhenkel.voicechat.gui.tooltips.DisableTooltipSupplier;
 import de.maxhenkel.voicechat.gui.tooltips.HideGroupHudTooltipSupplier;
 import de.maxhenkel.voicechat.gui.tooltips.MuteTooltipSupplier;
+import de.maxhenkel.voicechat.gui.widgets.ForceableToggleImageButton;
 import de.maxhenkel.voicechat.gui.widgets.ImageButton;
 import de.maxhenkel.voicechat.gui.widgets.ToggleImageButton;
 import de.maxhenkel.voicechat.net.ClientServerNetManager;
 import de.maxhenkel.voicechat.net.LeaveGroupPacket;
 import de.maxhenkel.voicechat.voice.client.ClientManager;
 import de.maxhenkel.voicechat.voice.client.ClientPlayerStateManager;
-import de.maxhenkel.voicechat.voice.client.MicrophoneActivationType;
 import de.maxhenkel.voicechat.voice.common.ClientGroup;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Tooltip;
@@ -43,8 +43,8 @@ public class GroupScreen extends VoiceChatScreenBase {
     protected int units;
 
     protected final ClientGroup group;
-    protected ToggleImageButton mute;
-    protected ToggleImageButton disable;
+    protected ForceableToggleImageButton mute;
+    protected ForceableToggleImageButton disable;
     protected ToggleImageButton showHUD;
     protected ImageButton leave;
 
@@ -74,12 +74,12 @@ public class GroupScreen extends VoiceChatScreenBase {
         int buttonY = guiTop + ySize - 20 - 7;
         int buttonSize = 20;
 
-        mute = new ToggleImageButton(guiLeft + 7, buttonY, MICROPHONE, stateManager::isMuted, button -> {
+        mute = new ForceableToggleImageButton(guiLeft + 7, buttonY, MICROPHONE, stateManager::isMuted, button -> {
             stateManager.setMuted(!stateManager.isMuted());
         }, new MuteTooltipSupplier(this, stateManager));
         addRenderableWidget(mute);
 
-        disable = new ToggleImageButton(guiLeft + 7 + buttonSize + 3, buttonY, SPEAKER, stateManager::isDisabled, button -> {
+        disable = new ForceableToggleImageButton(guiLeft + 7 + buttonSize + 3, buttonY, SPEAKER, stateManager::isDisabled, button -> {
             stateManager.setDisabled(!stateManager.isDisabled());
         }, new DisableTooltipSupplier(this, stateManager));
         addRenderableWidget(disable);
@@ -91,7 +91,6 @@ public class GroupScreen extends VoiceChatScreenBase {
 
         leave = new ImageButton(guiLeft + xSize - buttonSize - 7, buttonY, LEAVE, button -> {
             ClientServerNetManager.sendToServer(new LeaveGroupPacket());
-            minecraft.gui.setScreen(new JoinGroupScreen());
         });
         leave.setTooltip(Tooltip.create(LEAVE_GROUP));
         addRenderableWidget(leave);
@@ -106,7 +105,9 @@ public class GroupScreen extends VoiceChatScreenBase {
     }
 
     private void checkButtons() {
-        mute.active = VoicechatClient.CLIENT_CONFIG.microphoneActivationType.get().equals(MicrophoneActivationType.VOICE);
+        ClientPlayerStateManager stateManager = ClientManager.getPlayerStateManager();
+        mute.active = !stateManager.isForceMuted();
+        disable.active = !stateManager.isForceDisabled();
         showHUD.active = !VoicechatClient.CLIENT_CONFIG.hideIcons.get();
     }
 

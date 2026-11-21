@@ -5,7 +5,9 @@ import de.maxhenkel.voicechat.Voicechat;
 import de.maxhenkel.voicechat.VoicechatClient;
 import de.maxhenkel.voicechat.voice.client.MicrophoneException;
 import de.maxhenkel.voicechat.voice.common.AudioUtils;
+import org.lwjgl.openal.ALC11;
 
+import javax.annotation.Nullable;
 import java.util.List;
 
 public class MicrophoneManager {
@@ -36,9 +38,30 @@ public class MicrophoneManager {
     }
 
     private static Microphone createALMicrophone() throws MicrophoneException {
-        Microphone mic = new ALMicrophone(AudioUtils.SAMPLE_RATE, AudioUtils.FRAME_SIZE, VoicechatClient.CLIENT_CONFIG.microphone.get());
+        String deviceName = VoicechatClient.CLIENT_CONFIG.microphone.get();
+        try {
+            return openALMicrophone(deviceName);
+        } catch (MicrophoneException e) {
+            if (deviceName.isEmpty()) {
+                throw e;
+            }
+            Voicechat.LOGGER.warn("Failed to open microphone '{}', falling back to default microphone", deviceName);
+            return openALMicrophone("");
+        }
+    }
+
+    private static Microphone openALMicrophone(String deviceName) throws MicrophoneException {
+        Microphone mic = new ALMicrophone(AudioUtils.SAMPLE_RATE, AudioUtils.FRAME_SIZE, deviceName);
         mic.open();
         return mic;
+    }
+
+    @Nullable
+    public static String getDefaultMicrophone() {
+        if (useJavaImplementation()) {
+            return null;
+        }
+        return ALC11.alcGetString(0L, ALC11.ALC_CAPTURE_DEFAULT_DEVICE_SPECIFIER);
     }
 
     public static List<String> deviceNames() {

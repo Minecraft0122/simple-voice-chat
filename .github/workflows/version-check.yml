@@ -39,6 +39,7 @@ jobs:
           modules=$(sed 's@/\*.*\*/@@g' settings.gradle | sed -n 's/^include(\(.*\))/\1/p' | tr -d "'" | tr ',' ' ')
           tasks=()
           for module in fabric neoforge forge paper bukkit velocity bungeecord; do
+            if [ "$module" = forge ] && grep -q '^minecraft_version=26.3' gradle.properties; then continue; fi
             if printf '%s\n' "$modules" | grep -qw "$module"; then tasks+=(":$module:build"); fi
           done
           bash gradlew "${tasks[@]}" --console=plain
@@ -49,7 +50,7 @@ jobs:
             (cd quilt && bash ../gradlew build --console=plain)
           fi
       - name: Check direct protocol and generated configuration
-        if: github.ref_name == 'tcp/26.3'
+        if: github.ref_name == 'tcp/26.3' || startsWith(github.ref_name, 'tcp/26.3-')
         run: |
           python3 tests/direct/run.py
           python3 tests/config/run.py

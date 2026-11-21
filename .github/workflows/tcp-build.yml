@@ -1,4 +1,4 @@
-name: Build TCP voice chat
+name: Test TCP voice transports
 
 on:
   push:
@@ -29,50 +29,3 @@ jobs:
         run: bash scripts/test-runtime.sh
       - name: Run actual client lifecycle regressions with game and audio doubles
         run: python3 tests/client/run.py
-
-  build:
-    runs-on: ubuntu-latest
-    timeout-minutes: 40
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: '25'
-      - uses: gradle/actions/setup-gradle@v6
-      - name: Build supported platforms
-        shell: bash
-        run: |
-          tasks=(:fabric:build :paper:build :neoforge:build)
-          # Platform overrides must match the release version used by mods.
-          if grep -q '^minecraft_version=26.3' gradle.properties; then
-            version=$(sed -n 's/^mod_version=//p' gradle.properties)
-            for platform in bukkit velocity bungeecord; do
-              grep -qx "mod_version=$version" "$platform/gradle.properties" || exit 1
-            done
-          fi
-          if ! grep -q '^minecraft_version=26.3' gradle.properties; then
-            tasks+=(:forge:build)
-          else
-            tasks+=(:bukkit:build :velocity:build :bungeecord:build)
-          fi
-          bash gradlew "${tasks[@]}" --console=plain
-      - name: Test common and Bukkit direct protocol codecs
-        run: python3 tests/direct/run.py
-      - name: Test proxy detection and generated configuration migration
-        run: python3 tests/config/run.py
-      - uses: actions/upload-artifact@v4
-        with:
-          name: simple-voice-chat-tcp
-          if-no-files-found: error
-          path: |
-            fabric/build/libs/*.jar
-            paper/build/libs/*.jar
-            bukkit/build/libs/*.jar
-            neoforge/build/libs/*.jar
-            forge/build/libs/*.jar
-            velocity/build/libs/*.jar
-            bungeecord/build/libs/*.jar
-            !**/*-sources.jar
-            !**/*-javadoc.jar
-            !**/*-dev.jar

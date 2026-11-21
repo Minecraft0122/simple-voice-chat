@@ -9,6 +9,7 @@ import de.maxhenkel.voicechat.api.audiolistener.AudioListener;
 import de.maxhenkel.voicechat.api.audiolistener.PlayerAudioListener;
 import de.maxhenkel.voicechat.api.events.*;
 import de.maxhenkel.voicechat.plugins.impl.GroupImpl;
+import de.maxhenkel.voicechat.plugins.impl.ServerPlayerImpl;
 import de.maxhenkel.voicechat.plugins.impl.VoicechatConnectionImpl;
 import de.maxhenkel.voicechat.plugins.impl.VoicechatServerApiImpl;
 import de.maxhenkel.voicechat.plugins.impl.VoicechatSocketImpl;
@@ -25,6 +26,7 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 public class PluginManager {
 
@@ -40,7 +42,7 @@ public class PluginManager {
         for (VoicechatPlugin plugin : plugins) {
             try {
                 plugin.initialize(VoicechatServerApiImpl.instance());
-            } catch (Exception e) {
+            } catch (Throwable e) {
                 Voicechat.LOGGER.error("Failed to initialize plugin '{}'", plugin.getPluginId(), e);
             }
         }
@@ -141,11 +143,12 @@ public class PluginManager {
         }
     }
 
-    public <T extends Event> boolean dispatchEvent(Class<T> eventClass, T event) {
+    public <T extends Event> boolean dispatchEvent(Class<T> eventClass, Supplier<T> eventSupplier) {
         List<Consumer<? extends Event>> events = this.events.get(eventClass);
         if (events == null) {
             return false;
         }
+        T event = eventSupplier.get();
         for (Consumer<? extends Event> evt : events) {
             try {
                 Consumer<T> e = (Consumer<T>) evt;
@@ -160,9 +163,13 @@ public class PluginManager {
         return event.isCancelled();
     }
 
+    public boolean hasListeners(Class<? extends Event> eventClass) {
+        return events.containsKey(eventClass);
+    }
+
     public VoicechatSocket getSocketImplementation() {
         VoicechatServerStartingEventImpl event = new VoicechatServerStartingEventImpl();
-        dispatchEvent(VoicechatServerStartingEvent.class, event);
+        dispatchEvent(VoicechatServerStartingEvent.class, () -> event);
         VoicechatSocket socket = event.getSocketImplementation();
         if (socket == null) {
             socket = new VoicechatSocketImpl();
@@ -175,46 +182,61 @@ public class PluginManager {
 
     public String getVoiceHost(Player player, String voiceHost) {
         VoiceHostEventImpl event = new VoiceHostEventImpl(player, voiceHost);
-        dispatchEvent(VoiceHostEvent.class, event);
+        dispatchEvent(VoiceHostEvent.class, () -> event);
         return event.getVoiceHost();
     }
 
     public void onRegisterVolumeCategory(VolumeCategory category) {
-        dispatchEvent(RegisterVolumeCategoryEvent.class, new RegisterVolumeCategoryEventImpl(category));
+        dispatchEvent(RegisterVolumeCategoryEvent.class, () -> new RegisterVolumeCategoryEventImpl(category));
     }
 
     public void onUnregisterVolumeCategory(VolumeCategory category) {
-        dispatchEvent(UnregisterVolumeCategoryEvent.class, new UnregisterVolumeCategoryEventImpl(category));
+        dispatchEvent(UnregisterVolumeCategoryEvent.class, () -> new UnregisterVolumeCategoryEventImpl(category));
     }
 
     public void onServerStarted() {
-        dispatchEvent(VoicechatServerStartedEvent.class, new VoicechatServerStartedEventImpl());
+        dispatchEvent(VoicechatServerStartedEvent.class, VoicechatServerStartedEventImpl::new);
     }
 
     public void onServerStopped() {
-        dispatchEvent(VoicechatServerStoppedEvent.class, new VoicechatServerStoppedEventImpl());
+        dispatchEvent(VoicechatServerStoppedEvent.class, VoicechatServerStoppedEventImpl::new);
     }
 
     public void onPlayerConnected(@Nullable Player player) {
         if (player == null) {
             return;
         }
-        dispatchEvent(PlayerConnectedEvent.class, new PlayerConnectedEventImpl(VoicechatConnectionImpl.fromPlayer(player)));
+        dispatchEvent(PlayerConnectedEvent.class, () -> new PlayerConnectedEventImpl(VoicechatConnectionImpl.fromPlayer(player)));
     }
 
     public void onPlayerDisconnected(UUID player) {
-        dispatchEvent(PlayerDisconnectedEvent.class, new PlayerDisconnectedEventImpl(player));
+        dispatchEvent(PlayerDisconnectedEvent.class, () -> new PlayerDisconnectedEventImpl(player));
     }
 
     public void onPlayerStateChanged(PlayerState state) {
-        dispatchEvent(PlayerStateChangedEvent.class, new PlayerStateChangedEventImpl(state));
+        dispatchEvent(PlayerStateChangedEvent.class, () -> new PlayerStateChangedEventImpl(state));
+    }
+
+    public PlayerForcedStateEvent onPlayerForcedState(Player player, PlayerState state, boolean forceMuted, boolean forceDisabled) {
+        PlayerForcedStateEventImpl event = new PlayerForcedStateEventImpl(new VoicechatConnectionImpl(player, state), forceMuted, forceDisabled);
+        dispatchEvent(PlayerForcedStateEvent.class, () -> event);
+        return event;
+    }
+
+    public boolean isHidden(Player observer, Player player, boolean hidden) {
+        if (!hasListeners(PlayerVisibilityEvent.class)) {
+            return hidden;
+        }
+        PlayerVisibilityEventImpl event = new PlayerVisibilityEventImpl(new ServerPlayerImpl(observer), new ServerPlayerImpl(player), hidden);
+        dispatchEvent(PlayerVisibilityEvent.class, () -> event);
+        return event.isHidden();
     }
 
     public boolean onJoinGroup(Player player, @Nullable Group group) {
         if (group == null) {
             return onLeaveGroup(player);
         }
-        return dispatchEvent(JoinGroupEvent.class, new JoinGroupEventImpl(new GroupImpl(group), VoicechatConnectionImpl.fromPlayer(player)));
+        return dispatchEvent(JoinGroupEvent.class, () -> new JoinGroupEventImpl(new GroupImpl(group), VoicechatConnectionImpl.fromPlayer(player)));
     }
 
     public boolean onCreateGroup(@Nullable Player player, @Nullable Group group) {
@@ -224,7 +246,7 @@ public class PluginManager {
             }
             return onLeaveGroup(player);
         }
-        return dispatchEvent(CreateGroupEvent.class, new CreateGroupEventImpl(new GroupImpl(group), VoicechatConnectionImpl.fromPlayer(player)));
+        return dispatchEvent(CreateGroupEvent.class, () -> new CreateGroupEventImpl(new GroupImpl(group), VoicechatConnectionImpl.fromPlayer(player)));
     }
 
     public boolean onLeaveGroup(Player player) {
@@ -232,68 +254,62 @@ public class PluginManager {
         if (server == null) {
             return false;
         }
-        @Nullable GroupImpl group = null;
         PlayerState state = server.getPlayerStateManager().getState(player.getUniqueId());
-        if (state != null) {
-            UUID groupUUID = state.getGroup();
-            if (groupUUID != null) {
-                Group g = server.getGroupManager().getGroup(groupUUID);
-                if (g != null) {
-                    group = new GroupImpl(g);
-                }
-            }
-        }
-
-        return dispatchEvent(LeaveGroupEvent.class, new LeaveGroupEventImpl(group, VoicechatConnectionImpl.fromPlayer(player)));
+        return dispatchEvent(LeaveGroupEvent.class, () -> new LeaveGroupEventImpl(state == null ? null : GroupImpl.create(state), VoicechatConnectionImpl.fromPlayer(player)));
     }
 
     public boolean onRemoveGroup(Group group) {
-        return dispatchEvent(RemoveGroupEvent.class, new RemoveGroupEventImpl(new GroupImpl(group)));
+        return dispatchEvent(RemoveGroupEvent.class, () -> new RemoveGroupEventImpl(new GroupImpl(group)));
     }
 
     public boolean onMicPacket(Player sender, PlayerState senderState, MicPacket packet) {
-        return dispatchEvent(MicrophonePacketEvent.class, new MicrophonePacketEventImpl(
+        return dispatchEvent(MicrophonePacketEvent.class, () -> new MicrophonePacketEventImpl(
                 new MicrophonePacketImpl(packet, sender.getUniqueId()),
                 new VoicechatConnectionImpl(sender, senderState)
         ));
     }
 
     public float getDistance(Player sender, PlayerState senderState, MicPacket packet, float originalDistance) {
+        if (!hasListeners(VoiceDistanceEvent.class)) {
+            return originalDistance;
+        }
         VoiceDistanceEventImpl event = new VoiceDistanceEventImpl(new MicrophonePacketImpl(packet, sender.getUniqueId()), new VoicechatConnectionImpl(sender, senderState), originalDistance);
-        dispatchEvent(VoiceDistanceEvent.class, event);
+        dispatchEvent(VoiceDistanceEvent.class, () -> event);
         return event.getDistance();
     }
 
     public boolean onSoundPacket(@Nullable Player sender, @Nullable PlayerState senderState, Player receiver, PlayerState receiverState, SoundPacket<?> p, String source) {
-        VoicechatConnection senderConnection = null;
-        if (sender != null && senderState != null) {
-            senderConnection = new VoicechatConnectionImpl(sender, senderState);
-        }
-
-        VoicechatConnection receiverConnection = new VoicechatConnectionImpl(receiver, receiverState);
         if (p instanceof LocationSoundPacket) {
-            return dispatchEvent(LocationalSoundPacketEvent.class, new LocationalSoundPacketEventImpl(
+            return dispatchEvent(LocationalSoundPacketEvent.class, () -> new LocationalSoundPacketEventImpl(
                     new LocationalSoundPacketImpl((LocationSoundPacket) p),
-                    senderConnection,
-                    receiverConnection,
+                    createConnection(sender, senderState),
+                    new VoicechatConnectionImpl(receiver, receiverState),
                     source
             ));
         } else if (p instanceof PlayerSoundPacket) {
-            return dispatchEvent(EntitySoundPacketEvent.class, new EntitySoundPacketEventImpl(
+            return dispatchEvent(EntitySoundPacketEvent.class, () -> new EntitySoundPacketEventImpl(
                     new EntitySoundPacketImpl((PlayerSoundPacket) p),
-                    senderConnection,
-                    receiverConnection,
+                    createConnection(sender, senderState),
+                    new VoicechatConnectionImpl(receiver, receiverState),
                     source
             ));
         } else if (p instanceof GroupSoundPacket) {
-            return dispatchEvent(StaticSoundPacketEvent.class, new StaticSoundPacketEventImpl(
+            return dispatchEvent(StaticSoundPacketEvent.class, () -> new StaticSoundPacketEventImpl(
                     new StaticSoundPacketImpl((GroupSoundPacket) p),
-                    senderConnection,
-                    receiverConnection,
+                    createConnection(sender, senderState),
+                    new VoicechatConnectionImpl(receiver, receiverState),
                     source
             ));
         }
         return false;
+    }
+
+    @Nullable
+    private static VoicechatConnection createConnection(@Nullable Player player, @Nullable PlayerState state) {
+        if (player == null || state == null) {
+            return null;
+        }
+        return new VoicechatConnectionImpl(player, state);
     }
 
     private static PluginManager instance;
