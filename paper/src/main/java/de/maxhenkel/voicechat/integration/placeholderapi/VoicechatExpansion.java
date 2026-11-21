@@ -48,19 +48,20 @@ public class VoicechatExpansion extends PlaceholderExpansion {
             return params.equalsIgnoreCase("installed") ? bool(installed) : "";
         }
 
+        // The legacy player-state packet has no mute or forced-state fields.
         switch (params.toLowerCase(Locale.ROOT)) {
             case "installed":
                 return bool(installed);
             case "connected":
                 return bool(!state.isDisconnected());
             case "disabled":
-                return bool(state.isDisabledOrForceDisabled());
+                return bool(state.isDisabled());
             case "force_disabled":
-                return bool(state.isForceDisabled());
+                return bool(false);
             case "muted":
-                return bool(state.isMutedOrForceMuted());
+                return bool(false);
             case "force_muted":
-                return bool(state.isForceMuted());
+                return bool(false);
             case "group":
                 Group group = state.hasGroup() ? server.getGroupManager().getGroup(state.getGroup()) : null;
                 return group == null ? "" : group.getName();
@@ -78,17 +79,8 @@ public class VoicechatExpansion extends PlaceholderExpansion {
         if (state.isDisconnected()) {
             return "disconnected";
         }
-        if (state.isForceDisabled()) {
-            return "force_disabled";
-        }
         if (state.isDisabled()) {
             return "disabled";
-        }
-        if (state.isForceMuted()) {
-            return "force_muted";
-        }
-        if (state.isMuted()) {
-            return "muted";
         }
         return "active";
     }
