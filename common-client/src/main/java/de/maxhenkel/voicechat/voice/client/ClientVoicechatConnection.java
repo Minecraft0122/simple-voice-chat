@@ -2,6 +2,8 @@ package de.maxhenkel.voicechat.voice.client;
 
 import de.maxhenkel.voicechat.Voicechat;
 import de.maxhenkel.voicechat.api.ClientVoicechatSocket;
+import de.maxhenkel.voicechat.api.RawUdpPacket;
+import de.maxhenkel.voicechat.debug.CooldownTimer;
 import de.maxhenkel.voicechat.debug.VoicechatUncaughtExceptionHandler;
 import de.maxhenkel.voicechat.intercompatibility.ClientCompatibilityManager;
 import de.maxhenkel.voicechat.plugins.ClientPluginManager;
@@ -41,13 +43,8 @@ public class ClientVoicechatConnection extends Thread {
     public ClientVoicechatConnection(ClientVoicechat client, InitializationData data) throws Exception {
         this.client = client;
         this.data = data;
-        if (data.getServerIP().equals("rtc-local") || data.getServerIP().equals("rtc-remote")) {
-            this.address = InetAddress.getLoopbackAddress();
-        } else {
-            this.address = InetAddress.getByName(data.getServerIP());
-        }
         this.socket = ClientPluginManager.instance().getClientSocketImplementation();
-        this.lastKeepAlive = -1;
+        this.socket.open();
         this.running = true;
         this.authThread = new AuthThread();
         setDaemon(true);
@@ -61,6 +58,11 @@ public class ClientVoicechatConnection extends Thread {
         return data;
     }
 
+    /**
+     *
+     * @return the voice chat servers address - May be <code>null</code> if DNS hasn't been resolved yet
+     */
+    @Nullable
     public InetAddress getAddress() {
         return address;
     }
@@ -80,8 +82,43 @@ public class ClientVoicechatConnection extends Thread {
         // the packet reader in a single lifecycle.
         authThread.start();
         try {
+            address = resolveAddress();
+        } catch (UnknownHostException e) {
+            if (running) {
+                Voicechat.LOGGER.error("Failed to resolve voice chat server address '{}' - Disconnecting", data.getServerIP());
+                disconnect();
+            }
+            return;
+        }
+        authThread.start();
+        try {
             while (running) {
-                NetworkMessage in = ClientNetworkMessage.readPacketClient(socket.read(), this);
+                RawUdpPacket rawPacket;
+                try {
+                    rawPacket = socket.read();
+                } catch (ProtocolException e) {
+                    if (Voicechat.debugMode()) {
+                        Voicechat.LOGGER.warn("Failed to read packet", e);
+                    } else {
+                        CooldownTimer.run("socket_protocol_error", () -> {
+                            Voicechat.LOGGER.warn("Failed to read packet: {}", e.getMessage());
+                        });
+                    }
+                    continue;
+                }
+                NetworkMessage in;
+                try {
+                    in = ClientNetworkMessage.readPacketClient(rawPacket, this);
+                } catch (Exception e) {
+                    if (Voicechat.debugMode()) {
+                        Voicechat.LOGGER.debug("Failed to read packet from {}", rawPacket.getSocketAddress(), e);
+                    } else {
+                        CooldownTimer.run("failed_reading_packet", () -> {
+                            Voicechat.LOGGER.warn("Failed to read packet from {}", rawPacket.getSocketAddress());
+                        });
+                    }
+                    continue;
+                }
                 if (in == null) {
                     continue;
                 } else if (in.getPacket() instanceof AuthenticationChallengePacket challenge) {
@@ -95,14 +132,15 @@ public class ClientVoicechatConnection extends Thread {
                 } else if (in.getPacket() instanceof AuthenticateAckPacket) {
                     if (!authenticated) {
                         Voicechat.LOGGER.info("Server acknowledged authentication");
+                        connectionCheckNonce = packet.getNonce();
                         authenticated = true;
                     }
                 } else if (in.getPacket() instanceof ConnectionCheckAckPacket) {
                     if (authenticated && !connected) {
                         Voicechat.LOGGER.info("Server acknowledged connection check");
+                        lastKeepAlive = Utils.getMilliseconds();
                         connected = true;
-                        ClientCompatibilityManager.INSTANCE.emitVoiceChatConnectedEvent(this);
-                        lastKeepAlive = System.currentTimeMillis();
+                        executeIfActive(() -> ClientCompatibilityManager.INSTANCE.emitVoiceChatConnectedEvent(this));
                     }
                 } else if (in.getPacket() instanceof SoundPacket packet) {
                     client.processSoundPacket(packet);
@@ -110,7 +148,7 @@ public class ClientVoicechatConnection extends Thread {
                     Voicechat.LOGGER.info("Received ping {}, sending pong...", packet.getId());
                     sendToServer(new NetworkMessage(packet));
                 } else if (in.getPacket() instanceof KeepAlivePacket) {
-                    lastKeepAlive = System.currentTimeMillis();
+                    lastKeepAlive = Utils.getMilliseconds();
                     sendToServer(new NetworkMessage(new KeepAlivePacket()));
                 }
             }
@@ -120,6 +158,13 @@ public class ClientVoicechatConnection extends Thread {
                 failConnection(e);
             }
         }
+    }
+
+    private InetAddress resolveAddress() throws UnknownHostException {
+        if (data.getServerIP().equals("rtc-local") || data.getServerIP().equals("rtc-remote")) {
+            return InetAddress.getLoopbackAddress();
+        }
+        return InetAddress.getByName(data.getServerIP());
     }
 
     public void close() {
@@ -179,7 +224,7 @@ public class ClientVoicechatConnection extends Thread {
     }
 
     public void checkTimeout() {
-        if (lastKeepAlive >= 0 && System.currentTimeMillis() - lastKeepAlive > data.getKeepAlive() * 10L) {
+        if (connected && Utils.getMilliseconds() - lastKeepAlive > data.getKeepAlive() * 10L) {
             Voicechat.LOGGER.info("Connection timeout");
             failConnection(new IOException("Voice chat keep-alive timed out"));
         }
@@ -191,7 +236,7 @@ public class ClientVoicechatConnection extends Thread {
 
     private class AuthThread extends Thread {
 
-        private boolean running;
+        private volatile boolean running;
         private int authLogMessageCount;
         private int validateLogMessageCount;
 

@@ -1,6 +1,8 @@
 package de.maxhenkel.voicechat.voice.server;
 
+import de.maxhenkel.voicechat.legacy.LegacyCompatibility;
 import de.maxhenkel.voicechat.voice.common.NetworkMessage;
+import de.maxhenkel.voicechat.voice.common.Utils;
 
 import java.net.SocketAddress;
 import java.util.UUID;
@@ -30,14 +32,18 @@ public class ClientConnection {
     protected final SocketAddress address;
     protected long lastKeepAliveResponse;
 
-    public ClientConnection(UUID playerUUID, SocketAddress address) {
-        this.playerUUID = playerUUID;
+    public ClientConnection(ConnectionSecret connectionSecret, SocketAddress address) {
+        this.connectionSecret = connectionSecret;
         this.address = address;
-        this.lastKeepAliveResponse = System.currentTimeMillis();
+        this.lastKeepAliveResponse = Utils.getMilliseconds();
     }
 
     public UUID getPlayerUUID() {
-        return playerUUID;
+        return connectionSecret.getPlayerUUID();
+    }
+
+    public ConnectionSecret getConnectionSecret() {
+        return connectionSecret;
     }
 
     public SocketAddress getAddress() {
@@ -50,6 +56,14 @@ public class ClientConnection {
 
     public void setLastKeepAliveResponse(long lastKeepAliveResponse) {
         this.lastKeepAliveResponse = lastKeepAliveResponse;
+    }
+
+    public boolean isInitialized() {
+        return initialized;
+    }
+
+    public void setInitialized(boolean initialized) {
+        this.initialized = initialized;
     }
 
     public void send(Server server, NetworkMessage message) throws Exception {

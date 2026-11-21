@@ -1,1 +1,23 @@
-- Updated to 26.3
+- Added server-side force muting
+- Added server-side force disabling
+- Make `voicechat.speak` permission use force muting
+- Make `voicechat.listen` permission use force disabling
+- Make force muting and force disabling available in the API
+- New force mute and force disable icons that are shown above other players and in the HUD
+- Allow muting when using push to talk
+- Sync mute state to other players
+- Show above other players if they are muted
+- Fixed onboarding volume testing bar being broken on wide screens
+- Separate players and other volumes into separate tabs in the adjust volumes screen
+- Allow nesting volume categories using the API
+- Improved voice chat initialization protocol to prevent potential attacks
+- Prevent incompatible clients from receiving/sending their states to the server
+- Reworked PlaceholderAPI support
+- Allow addons to hide players from other players using the API
+- Added `packet_queue_size` config option
+- Kick players if they send malformed packets
+- Properly prevent players from leaving groups using the API
+- Always call leave group event when a player changes their group
+- Don't register commands on paper if the plugin doesn't support the Minecraft version
+- Added UDP packet rate limiting
+- Fixed some systems breaking when the system time changes

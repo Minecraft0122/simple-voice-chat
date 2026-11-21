@@ -109,6 +109,7 @@ public class VoicechatServerApiImpl extends VoicechatApiImpl implements Voicecha
             return null;
         }
         StaticAudioChannelImpl staticAudioChannel = new StaticAudioChannelImpl(channelId, server);
+        staticAudioChannel.setBypassGroupIsolation(true);
         staticAudioChannel.addTarget(connection);
         return staticAudioChannel;
     }
@@ -235,7 +236,11 @@ public class VoicechatServerApiImpl extends VoicechatApiImpl implements Voicecha
         if (server == null) {
             return null;
         }
-        return new GroupImpl(server.getGroupManager().getGroup(groupId));
+        de.maxhenkel.voicechat.voice.server.Group group = server.getGroupManager().getGroup(groupId);
+        if (group == null) {
+            return null;
+        }
+        return new GroupImpl(group);
     }
 
     @Override
@@ -244,7 +249,7 @@ public class VoicechatServerApiImpl extends VoicechatApiImpl implements Voicecha
         if (server == null) {
             return Collections.emptyList();
         }
-        return server.getGroupManager().getGroups().values().stream().map(group -> (Group) new GroupImpl(group)).collect(Collectors.toList());
+        return Collections.unmodifiableList(server.getGroupManager().getGroups().values().stream().map(group -> (Group) new GroupImpl(group)).collect(Collectors.toList()));
     }
 
     @Nullable
@@ -298,7 +303,7 @@ public class VoicechatServerApiImpl extends VoicechatApiImpl implements Voicecha
         if (server == null) {
             return Collections.emptyList();
         }
-        return server.getCategoryManager().getCategories().stream().map(VolumeCategory.class::cast).collect(Collectors.toList());
+        return Collections.unmodifiableList(server.getCategoryManager().getCategories().stream().map(VolumeCategory.class::cast).collect(Collectors.toList()));
     }
 
     @Override

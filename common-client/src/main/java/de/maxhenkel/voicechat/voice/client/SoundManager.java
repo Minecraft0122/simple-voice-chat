@@ -2,9 +2,11 @@ package de.maxhenkel.voicechat.voice.client;
 
 import de.maxhenkel.voicechat.Voicechat;
 import de.maxhenkel.voicechat.VoicechatClient;
+import de.maxhenkel.voicechat.debug.CooldownTimer;
 import de.maxhenkel.voicechat.plugins.ClientPluginManager;
 import de.maxhenkel.voicechat.voice.client.speaker.Speaker;
 import de.maxhenkel.voicechat.voice.client.speaker.SpeakerException;
+import de.maxhenkel.voicechat.voice.common.Utils;
 import org.lwjgl.openal.*;
 
 import javax.annotation.Nullable;
@@ -38,10 +40,22 @@ public class SoundManager {
     }
 
     public static SoundManager create() throws SpeakerException {
-        return create(VoicechatClient.CLIENT_CONFIG.speaker.get());
+        String deviceName = VoicechatClient.CLIENT_CONFIG.speaker.get();
+        try {
+            return create(deviceName);
+        } catch (SpeakerException e) {
+            if (deviceName.isEmpty()) {
+                throw e;
+            }
+            Voicechat.LOGGER.warn("Failed to open audio device '{}', falling back to default", deviceName);
+            return create("");
+        }
     }
 
-    public static SoundManager create(@Nullable String deviceName) throws SpeakerException {
+    /**
+     * @param deviceName the name of the device or an empty string for the default device
+     */
+    private static SoundManager create(String deviceName) throws SpeakerException {
         long device = 0L;
         long context = 0L;
         try {
@@ -73,7 +87,8 @@ public class SoundManager {
 
             ClientPluginManager.instance().onCreateALContext(context, device);
 
-            SoundManager soundManager = new SoundManager(deviceName, device, context, alCaps, maxGain);
+            SoundManager soundManager = new SoundManager(ALC11.alcGetString(device, ALC11.ALC_ALL_DEVICES_SPECIFIER), device, context, alCaps, maxGain);
+            Voicechat.LOGGER.info("Opened speaker '{}'", soundManager.getDeviceName());
             device = 0L;
             context = 0L;
             return soundManager;
@@ -144,6 +159,14 @@ public class SoundManager {
         }
     }
 
+    /**
+     * @return the name of the opened device or <code>null</code> if it is unknown
+     */
+    @Nullable
+    public String getDeviceName() {
+        return deviceName;
+    }
+
     public float getMaxGain() {
         return maxGain;
     }
@@ -152,22 +175,18 @@ public class SoundManager {
         return context == 0 || device == 0;
     }
 
-    private static long openSpeaker(@Nullable String name) throws SpeakerException {
-        try {
-            return tryOpenSpeaker(name);
-        } catch (SpeakerException e) {
-            if (name == null) {
-                throw e;
-            }
-            Voicechat.LOGGER.warn("Failed to open audio device '{}', falling back to default", name);
-            return tryOpenSpeaker(null);
-        }
+    public boolean isDisconnected() {
+        return isDisconnected(device);
     }
 
-    private static long tryOpenSpeaker(@Nullable String string) throws SpeakerException {
+    public static boolean isDisconnected(long device) {
+        return ALC11.alcIsExtensionPresent(device, "ALC_EXT_disconnect") && ALC11.alcGetInteger(device, EXTDisconnect.ALC_CONNECTED) == ALC11.ALC_FALSE;
+    }
+
+    private static long openSpeaker(String string) throws SpeakerException {
         long device = ALC11.alcOpenDevice(string);
         if (device == 0L) {
-            if (string == null) {
+            if (string.isEmpty()) {
                 throw new SpeakerException("Failed to open default audio device");
             }
             throw new SpeakerException(String.format("Failed to open audio device: Audio device '%s' not found", string));
@@ -180,6 +199,11 @@ public class SoundManager {
             throw new SpeakerException(String.format("Failed to open audio device: %s", getAlcError(error)));
         }
         return device;
+    }
+
+    @Nullable
+    public static String getDefaultSpeaker() {
+        return ALC11.alcGetString(0L, ALC11.ALC_DEFAULT_ALL_DEVICES_SPECIFIER);
     }
 
     public static List<String> getAllSpeakers() {
@@ -211,9 +235,9 @@ public class SoundManager {
     }
 
     public void runInContext(Executor executor, Runnable runnable) {
-        long time = System.currentTimeMillis();
+        long time = Utils.getMilliseconds();
         executor.execute(() -> {
-            long diff = System.currentTimeMillis() - time;
+            long diff = Utils.getMilliseconds() - time;
             if (diff > 20 || (diff >= 5 && Voicechat.debugMode())) {
                 Voicechat.LOGGER.warn("Sound executor delay: {} ms!", diff);
             }
@@ -249,7 +273,9 @@ public class SoundManager {
             return false;
         }
         StackTraceElement stack = Thread.currentThread().getStackTrace()[2];
-        Voicechat.LOGGER.error("Voicechat sound manager AL error: {}.{}[{}] {}", stack.getClassName(), stack.getMethodName(), stack.getLineNumber(), getAlError(error));
+        CooldownTimer.run(String.format("al_error_%s_%s_%s", stack.getClassName(), stack.getLineNumber(), error), 1000L, () -> {
+            Voicechat.LOGGER.error("Voicechat sound manager AL error: {}.{}[{}] {}", stack.getClassName(), stack.getMethodName(), stack.getLineNumber(), getAlError(error));
+        });
         return true;
     }
 
@@ -259,7 +285,9 @@ public class SoundManager {
             return false;
         }
         StackTraceElement stack = Thread.currentThread().getStackTrace()[2];
-        Voicechat.LOGGER.error("Voicechat sound manager ALC error: {}.{}[{}] {}", stack.getClassName(), stack.getMethodName(), stack.getLineNumber(), getAlcError(error));
+        CooldownTimer.run(String.format("alc_error_%s_%s_%s", stack.getClassName(), stack.getLineNumber(), error), 1000L, () -> {
+            Voicechat.LOGGER.error("Voicechat sound manager ALC error: {}.{}[{}] {}", stack.getClassName(), stack.getMethodName(), stack.getLineNumber(), getAlcError(error));
+        });
         return true;
     }
 

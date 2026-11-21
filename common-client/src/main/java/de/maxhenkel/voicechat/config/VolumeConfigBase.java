@@ -8,8 +8,11 @@ import de.maxhenkel.voicechat.intercompatibility.CommonCompatibilityManager;
 
 import java.nio.file.Path;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 public abstract class VolumeConfigBase<T> extends CommentedPropertyConfig {
+
+    public static final double MAX_VOLUME = 4D;
 
     protected final Map<T, Double> volumes;
 
@@ -19,7 +22,7 @@ public abstract class VolumeConfigBase<T> extends CommentedPropertyConfig {
         reload();
         properties.setHeaderComments(Collections.singletonList(String.format("%s %s volume config", CommonCompatibilityManager.INSTANCE.getModName(), getConfigName())));
         Map<String, String> entries = getEntries();
-        volumes = new HashMap<>();
+        volumes = new ConcurrentHashMap<>();
         for (Map.Entry<String, String> entry : entries.entrySet()) {
             properties.setComments(entry.getKey(), Collections.emptyList());
             try {

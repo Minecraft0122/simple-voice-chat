@@ -1,27 +1,25 @@
 package de.maxhenkel.voicechat.voice.client;
 
 import com.mojang.blaze3d.vertex.PoseStack;
-import com.mojang.blaze3d.vertex.VertexConsumer;
 import de.maxhenkel.voicechat.Voicechat;
 import de.maxhenkel.voicechat.VoicechatClient;
 import de.maxhenkel.voicechat.gui.onboarding.OnboardingManager;
 import de.maxhenkel.voicechat.intercompatibility.ClientCompatibilityManager;
 import de.maxhenkel.voicechat.plugins.ClientPluginManager;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.renderer.RenderPipelines;
-import net.minecraft.client.renderer.SubmitNodeCollection;
 import net.minecraft.client.renderer.SubmitNodeCollector;
 import net.minecraft.client.renderer.entity.state.AvatarRenderState;
 import net.minecraft.client.renderer.entity.state.EntityRenderState;
-import net.minecraft.client.renderer.rendertype.RenderTypes;
 import net.minecraft.client.renderer.state.level.CameraRenderState;
-import net.minecraft.client.renderer.texture.OverlayTexture;
-import net.minecraft.client.renderer.texture.TextureAtlas;
-import net.minecraft.client.renderer.texture.TextureAtlasSprite;
 import net.minecraft.data.AtlasIds;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.contents.objects.AtlasSprite;
 import net.minecraft.resources.Identifier;
+import net.minecraft.util.ARGB;
+import net.minecraft.util.FormattedCharSequence;
 import net.minecraft.world.entity.Entity;
 
 import java.util.UUID;
@@ -31,9 +29,11 @@ public class RenderEvents {
     private static final Identifier MICROPHONE_ICON = Identifier.fromNamespaceAndPath(Voicechat.MODID, "icons/microphone");
     private static final Identifier WHISPER_MICROPHONE_ICON = Identifier.fromNamespaceAndPath(Voicechat.MODID, "icons/microphone_whisper");
     private static final Identifier MICROPHONE_OFF_ICON = Identifier.fromNamespaceAndPath(Voicechat.MODID, "icons/microphone_off");
+    private static final Identifier MICROPHONE_FORCED_OFF_ICON = Identifier.fromNamespaceAndPath(Voicechat.MODID, "icons/microphone_forced_off");
     private static final Identifier SPEAKER_ICON = Identifier.fromNamespaceAndPath(Voicechat.MODID, "icons/speaker");
     private static final Identifier WHISPER_SPEAKER_ICON = Identifier.fromNamespaceAndPath(Voicechat.MODID, "icons/speaker_whisper");
     private static final Identifier SPEAKER_OFF_ICON = Identifier.fromNamespaceAndPath(Voicechat.MODID, "icons/speaker_off");
+    private static final Identifier SPEAKER_FORCED_OFF_ICON = Identifier.fromNamespaceAndPath(Voicechat.MODID, "icons/speaker_forced_off");
     private static final Identifier DISCONNECT_ICON = Identifier.fromNamespaceAndPath(Voicechat.MODID, "icons/disconnected");
     private static final Identifier GROUP_ICON = Identifier.fromNamespaceAndPath(Voicechat.MODID, "icons/group");
 
@@ -59,7 +59,7 @@ public class RenderEvents {
         ClientPlayerStateManager manager = ClientManager.getPlayerStateManager();
         ClientVoicechat client = ClientManager.getClient();
 
-        if (manager.isDisconnected() && isStartup()) {
+        if (manager.isDisconnected() && client != null && client.isStartup()) {
             return;
         }
 
@@ -69,9 +69,13 @@ public class RenderEvents {
 
         if (manager.isDisconnected()) {
             renderIcon(guiGraphics, DISCONNECT_ICON);
+        } else if (manager.isForceDisabled()) {
+            renderIcon(guiGraphics, SPEAKER_FORCED_OFF_ICON);
         } else if (manager.isDisabled()) {
             renderIcon(guiGraphics, SPEAKER_OFF_ICON);
-        } else if (manager.isMuted() && VoicechatClient.CLIENT_CONFIG.microphoneActivationType.get().equals(MicrophoneActivationType.VOICE)) {
+        } else if (manager.isForceMuted()) {
+            renderIcon(guiGraphics, MICROPHONE_FORCED_OFF_ICON);
+        } else if (manager.isMuted()) {
             renderIcon(guiGraphics, MICROPHONE_OFF_ICON);
         } else if (client != null && client.getMicThread() != null) {
             if (client.getMicThread().isWhispering()) {
@@ -84,11 +88,6 @@ public class RenderEvents {
         if (manager.getGroupID() != null && VoicechatClient.CLIENT_CONFIG.showGroupHud.get()) {
             GroupChatManager.renderIcons(guiGraphics);
         }
-    }
-
-    private boolean isStartup() {
-        ClientVoicechat client = ClientManager.getClient();
-        return client != null && (System.currentTimeMillis() - client.getStartTime()) < 5000;
     }
 
     private void renderIcon(GuiGraphicsExtractor guiGraphics, Identifier texture) {
@@ -158,8 +157,14 @@ public class RenderEvents {
             renderPlayerIcon(entityId, state.isDiscrete, nameTag, DISCONNECT_ICON, stack, collector, state.lightCoords);
         } else if (groupId != null && !groupId.equals(manager.getGroupID())) {
             renderPlayerIcon(entityId, state.isDiscrete, nameTag, GROUP_ICON, stack, collector, state.lightCoords);
+        } else if (manager.isPlayerForceDisabled(entityId)) {
+            renderPlayerIcon(entityId, state.isDiscrete, nameTag, SPEAKER_FORCED_OFF_ICON, stack, collector, state.lightCoords);
         } else if (manager.isPlayerDisabled(entityId)) {
             renderPlayerIcon(entityId, state.isDiscrete, nameTag, SPEAKER_OFF_ICON, stack, collector, state.lightCoords);
+        } else if (manager.isPlayerForceMuted(entityId)) {
+            renderPlayerIcon(entityId, state.isDiscrete, nameTag, MICROPHONE_FORCED_OFF_ICON, stack, collector, state.lightCoords);
+        } else if (manager.isPlayerMuted(entityId)) {
+            renderPlayerIcon(entityId, state.isDiscrete, nameTag, MICROPHONE_OFF_ICON, stack, collector, state.lightCoords);
         }
 
         stack.popPose();
@@ -170,33 +175,20 @@ public class RenderEvents {
             return;
         }
         float offsetX = (float) (minecraft.font.width(component) / 2 + 2);
-        int alpha = 127;
         float offsetY = -1F;
-        TextureAtlas guiAtlas = minecraft.getAtlasManager().getAtlasOrThrow(AtlasIds.GUI);
-        TextureAtlasSprite sprite = guiAtlas.getSprite(texture);
-        collector.submitCustomGeometry(stack, RenderTypes.text(sprite.atlasLocation()), (pose, c) -> {
-            if (discrete) {
-                vertex(c, pose, offsetX, 10F + offsetY, 0F, sprite.getU0(), sprite.getV1(), alpha, light);
-                vertex(c, pose, offsetX + 10F, 10F + offsetY, 0F, sprite.getU1(), sprite.getV1(), alpha, light);
-                vertex(c, pose, offsetX + 10F, offsetY, 0F, sprite.getU1(), sprite.getV0(), alpha, light);
-                vertex(c, pose, offsetX, offsetY, 0F, sprite.getU0(), sprite.getV0(), alpha, light);
-            } else {
-                vertex(c, pose, offsetX, 10F + offsetY, 0F, sprite.getU0(), sprite.getV1(), light);
-                vertex(c, pose, offsetX + 10F, 10F + offsetY, 0F, sprite.getU1(), sprite.getV1(), light);
-                vertex(c, pose, offsetX + 10F, offsetY, 0F, sprite.getU1(), sprite.getV0(), light);
-                vertex(c, pose, offsetX, offsetY, 0F, sprite.getU0(), sprite.getV0(), light);
-            }
-        });
+        // See SumbitNodeCollection.submitNameTag
+        float backgroundAlpha = minecraft.gameRenderer.gameRenderState().optionsRenderState.getBackgroundOpacity(0.25F);
+        int translucentColor = ARGB.color(Math.max((backgroundAlpha + 0.75F) * 0.5F, 0.5F), 0xFFFFFF);
+        FormattedCharSequence icon = Component.object(new AtlasSprite(AtlasIds.GUI, texture)).getVisualOrderText();
+        stack.pushPose();
+        stack.translate(offsetX, offsetY, 0F);
+        // MC font is 8x8, VC icons are 10x10
+        stack.scale(10F / 8F, 10F / 8F, 1F);
+        collector.submitText(stack, 0F, 1F, icon, false, Font.DisplayMode.NORMAL, light, discrete ? translucentColor : 0xFFFFFFFF, 0, 0);
         if (!discrete) {
-            // Render type textSeeThrough crashes in the OIT phase
-            SubmitNodeCollection collection = (SubmitNodeCollection) collector.order(0);
-            collection.seeThrough.submit(new IconFeatureRenderer.Submit(stack.last().copy(), RenderTypes.textSeeThrough(sprite.atlasLocation()), (pose, c) -> {
-                vertex(c, pose, offsetX, 10F + offsetY, 0F, sprite.getU0(), sprite.getV1(), alpha, light);
-                vertex(c, pose, offsetX + 10F, 10F + offsetY, 0F, sprite.getU1(), sprite.getV1(), alpha, light);
-                vertex(c, pose, offsetX + 10F, offsetY, 0F, sprite.getU1(), sprite.getV0(), alpha, light);
-                vertex(c, pose, offsetX, offsetY, 0F, sprite.getU0(), sprite.getV0(), alpha, light);
-            }));
+            collector.submitText(stack, 0F, 1F, icon, false, Font.DisplayMode.SEE_THROUGH, light, translucentColor, 0, 0);
         }
+        stack.popPose();
     }
 
     private boolean shouldShowIcons() {
@@ -210,19 +202,6 @@ public class RenderEvents {
             return true;
         }
         return minecraft.getSingleplayerServer() == null || minecraft.getSingleplayerServer().isPublished();
-    }
-
-    private static void vertex(VertexConsumer builder, PoseStack.Pose pose, float x, float y, float z, float u, float v, int light) {
-        vertex(builder, pose, x, y, z, u, v, 255, light);
-    }
-
-    private static void vertex(VertexConsumer builder, PoseStack.Pose pose, float x, float y, float z, float u, float v, int alpha, int light) {
-        builder.addVertex(pose.pose(), x, y, z)
-                .setColor(255, 255, 255, alpha)
-                .setUv(u, v)
-                .setOverlay(OverlayTexture.NO_OVERLAY)
-                .setLight(light)
-                .setNormal(pose, 0F, 0F, -1F);
     }
 
 }

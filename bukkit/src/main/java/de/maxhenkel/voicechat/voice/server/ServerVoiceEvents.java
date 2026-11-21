@@ -6,6 +6,8 @@ import de.maxhenkel.voicechat.voice.transport.TransportMode;
 import de.maxhenkel.voicechat.Voicechat;
 import de.maxhenkel.voicechat.compatibility.PlayerHideEvent;
 import de.maxhenkel.voicechat.compatibility.PlayerShowEvent;
+import de.maxhenkel.voicechat.debug.CooldownTimer;
+import de.maxhenkel.voicechat.legacy.LegacyCompatibility;
 import de.maxhenkel.voicechat.net.NetManager;
 import de.maxhenkel.voicechat.net.PacketRateLimiter;
 import de.maxhenkel.voicechat.net.RequestSecretPacket;
@@ -13,7 +15,6 @@ import de.maxhenkel.voicechat.net.SecretPacket;
 import de.maxhenkel.voicechat.net.VersionPacket;
 import de.maxhenkel.voicechat.voice.transport.VoiceVersion;
 import de.maxhenkel.voicechat.plugins.PluginManager;
-import de.maxhenkel.voicechat.voice.common.Secret;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -128,15 +129,21 @@ public class ServerVoiceEvents implements Listener {
         if (server == null) {
             return;
         }
+        ConnectionSecret connectionSecret = server.getConnectionSecrets().create(player.getUniqueId());
+        if (connectionSecret == null) {
+            if (Voicechat.debugMode()) {
+                Voicechat.LOGGER.warn("Player {} already requested secret - ignoring", player.getName());
+            } else {
+                CooldownTimer.run(String.format("already_requested_secret_%s", player.getUniqueId()), () -> {
+                    Voicechat.LOGGER.warn("Player {} already requested secret - ignoring", player.getName());
+                });
+            }
+            return;
+        }
+
         server.getPlayerStateManager().onPlayerCompatibilityCheckSucceeded(player);
         server.getCategoryManager().onPlayerCompatibilityCheckSucceeded(player);
         server.getGroupManager().onPlayerCompatibilityCheckSucceeded(player);
-
-        Secret secret = server.generateNewSecret(player.getUniqueId());
-        if (secret == null) {
-            Voicechat.LOGGER.warn("Player already requested secret - ignoring");
-            return;
-        }
 
         String voiceHost = PluginManager.instance().getVoiceHost(player, Voicechat.SERVER_CONFIG.voiceHost.get());
         int advertisedPort = Voicechat.SERVER_CONFIG.isProxyMode() ? -1 : server.getPort();
@@ -184,6 +191,7 @@ public class ServerVoiceEvents implements Listener {
         }
 
         server.disconnectClient(event.getPlayer().getUniqueId());
+        server.getPacketRateLimiter().onPlayerLoggedOut(event.getPlayer());
         Voicechat.LOGGER.info("Disconnecting client {}", event.getPlayer().getName());
     }
 

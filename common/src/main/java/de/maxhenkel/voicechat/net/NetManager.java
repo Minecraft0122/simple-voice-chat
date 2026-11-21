@@ -2,6 +2,7 @@ package de.maxhenkel.voicechat.net;
 
 import de.maxhenkel.voicechat.Voicechat;
 import de.maxhenkel.voicechat.intercompatibility.CommonCompatibilityManager;
+import de.maxhenkel.voicechat.legacy.LegacyCompatibility;
 import net.minecraft.server.level.ServerPlayer;
 
 public abstract class NetManager {
@@ -46,6 +47,7 @@ public abstract class NetManager {
         joinedGroupChannel = registerReceiver(JoinedGroupPacket.class, true, false);
         addCategoryChannel = registerReceiver(AddCategoryPacket.class, true, false);
         removeCategoryChannel = registerReceiver(RemoveCategoryPacket.class, true, false);
+        LegacyCompatibility.registerChannels(this);
     }
 
     public abstract <T extends Packet<T>> Channel<T> registerReceiver(Class<T> packetType, boolean toClient, boolean toServer);
@@ -56,7 +58,11 @@ public abstract class NetManager {
         if (!(packet instanceof VersionPacket) && !Voicechat.SERVER.isCompatible(player)) {
             return;
         }
-        CommonCompatibilityManager.INSTANCE.getNetManager().sendToClient(packet, player);
+        Packet<?> translatedPacket = LegacyCompatibility.translateOutgoing(player, packet);
+        if (translatedPacket == null) {
+            return;
+        }
+        CommonCompatibilityManager.INSTANCE.getNetManager().sendToClient(translatedPacket, player);
     }
 
     public abstract void sendToClient(Packet<?> packet, ServerPlayer player);

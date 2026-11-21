@@ -1,10 +1,11 @@
 package de.maxhenkel.voicechat.voice.common;
 
 import de.maxhenkel.voicechat.Voicechat;
-import de.maxhenkel.voicechat.api.RawUdpPacket;
 import de.maxhenkel.voicechat.debug.PingHandler;
 import de.maxhenkel.voicechat.util.FriendlyByteBuf;
 import de.maxhenkel.voicechat.voice.server.ClientConnection;
+import de.maxhenkel.voicechat.voice.server.ConnectionSecret;
+import de.maxhenkel.voicechat.voice.server.UdpPacket;
 import de.maxhenkel.voicechat.voice.server.Server;
 import io.netty.buffer.Unpooled;
 import io.netty.handler.codec.DecoderException;
@@ -26,6 +27,7 @@ import java.util.UUID;
 public class NetworkMessage {
 
     public static final byte MAGIC_BYTE = (byte) 0b11111111;
+    public static final int NONCE_SIZE_BYTES = 16;
 
     private final long timestamp;
     private Packet<? extends Packet> packet;
@@ -40,7 +42,7 @@ public class NetworkMessage {
     }
 
     public NetworkMessage(Packet<?> packet) {
-        this(System.currentTimeMillis());
+        this(Utils.getMilliseconds());
         this.packet = packet;
     }
 
@@ -65,6 +67,14 @@ public class NetworkMessage {
         return address;
     }
 
+    /**
+     * @return the connection ID whose secret decrypted this message or null if the message was not received by the server
+     */
+    @Nullable
+    public UUID getConnectionId() {
+        return connectionId;
+    }
+
     private static final Map<Byte, Class<? extends Packet>> packetRegistry;
 
     static {
@@ -85,7 +95,7 @@ public class NetworkMessage {
     }
 
     @Nullable
-    public static NetworkMessage readPacketServer(RawUdpPacket packet, Server server) throws IllegalAccessException, InstantiationException, InvocationTargetException, NoSuchMethodException {
+    public static NetworkMessage readPacketServer(UdpPacket packet, Server server) throws IllegalAccessException, InstantiationException, InvocationTargetException, NoSuchMethodException {
         try {
             byte[] data = packet.getData();
             FriendlyByteBuf b = new FriendlyByteBuf(Unpooled.wrappedBuffer(data));
@@ -93,13 +103,14 @@ public class NetworkMessage {
                 Voicechat.LOGGER.debug("Received invalid packet from {}", packet.getSocketAddress());
                 return null;
             }
-            UUID playerID = b.readUUID();
-            if (!server.hasSecret(playerID)) {
-                if (PingHandler.onPacket(server, packet.getSocketAddress(), playerID, b)) {
+            UUID connectionId = b.readUUID();
+            ConnectionSecret connectionSecret = server.getConnectionSecrets().getByConnectionId(connectionId);
+            if (connectionSecret == null) {
+                if (PingHandler.onPacket(server, packet.getSocketAddress(), connectionId, b)) {
                     return null;
                 }
                 // Ignore packets if they are not from a player that has a secret
-                Voicechat.LOGGER.debug("Player {} does not have a secret", playerID);
+                Voicechat.LOGGER.debug("Connection {} does not have a secret", connectionId);
                 return null;
             }
             if (!server.acceptsTransport(playerID, packet.getSocketAddress())) return null;

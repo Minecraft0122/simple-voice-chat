@@ -20,6 +20,7 @@ public class ServerConfig {
     public ConfigEntry<Codec> voiceChatCodec;
     public ConfigEntry<Integer> voiceChatMtuSize;
     public ConfigEntry<Integer> tcpRateLimit;
+    public ConfigEntry<Integer> packetQueueSize;
     public ConfigEntry<Integer> keepAlive;
     public ConfigEntry<Boolean> groupsEnabled;
     public ConfigEntry<String> voiceHost;
