@@ -2,7 +2,6 @@ package de.maxhenkel.voicechat.voice.server;
 
 import de.maxhenkel.voicechat.Voicechat;
 import de.maxhenkel.voicechat.voice.common.PingPacket;
-import de.maxhenkel.voicechat.voice.common.Utils;
 
 import java.util.List;
 import java.util.Map;
@@ -26,7 +25,7 @@ public class PingManager {
         if (ping == null) {
             return;
         }
-        ping.listener.onPong(ping.attempt, Utils.getMilliseconds() - packet.getTimestamp());
+        ping.listener.onPong(ping.attempt, System.currentTimeMillis() - packet.getTimestamp());
     }
 
     public void checkTimeouts() {
@@ -76,11 +75,11 @@ public class PingManager {
         }
 
         public boolean isTimedOut() {
-            return (Utils.getMilliseconds() - timestamp) >= timeout;
+            return (System.currentTimeMillis() - timestamp) >= timeout;
         }
 
         public void send() throws Exception {
-            timestamp = Utils.getMilliseconds();
+            timestamp = System.currentTimeMillis();
             attempt++;
             server.sendPacketRaw(new PingPacket(id, timestamp), connection);
             Voicechat.LOGGER.info("Sent ping {} attempt {}", id, attempt);

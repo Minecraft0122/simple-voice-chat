@@ -18,7 +18,6 @@ public class ServerConfig {
     public final ConfigEntry<Codec> voiceChatCodec;
     public final ConfigEntry<Integer> voiceChatMtuSize;
     public final ConfigEntry<Integer> tcpRateLimit;
-    public final ConfigEntry<Integer> packetQueueSize;
     public final ConfigEntry<Integer> keepAlive;
     public final ConfigEntry<Boolean> groupsEnabled;
     public final ConfigEntry<String> voiceHost;
