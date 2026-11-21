@@ -86,6 +86,14 @@ A proximity voice chat for Minecraft with a variety of [addons](https://modrepo.
 :warning: **NOTE** This mod requires special setup on the server in order to work.
 Please read the [wiki](https://modrepo.de/minecraft/voicechat/wiki/setup) for more information.
 
+## TCP/UDP compatibility in this fork
+
+For the 26.3 fork builds, the server can accept the original UDP protocol and the fork's TCP protocol. Set `transport_mode` in `voicechat-server.properties` to `udp`, `tcp`, or `dual`. The default is `tcp`; use `dual` when both fork clients and original UDP clients need to connect.
+
+When using `dual`, forward both TCP and UDP on the configured voice port. TCP and dual mode require a voice port different from the Minecraft game TCP port. `transport_preference` controls which transport a dual-capable fork client tries first; it does not enable a transport that `transport_mode` has disabled.
+
+TCP clients require a matching client build from this fork. UDP mode remains compatible with the original UDP protocol. For Velocity or BungeeCord, install the matching fork build on the proxy and every backend, and configure the same `transport_mode` on each server.
+
 <p align="center">
     <a href="https://discord.gg/4dH2zwTmyX">
         <img src="assets/discord.svg" width="300">
