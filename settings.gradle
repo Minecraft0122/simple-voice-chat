@@ -11,4 +11,5 @@ pluginManagement {
 }
 
 rootProject.name = 'voicechat'
-include('api', 'common', 'common-client', 'common-proxy', 'fabric', 'fabric:api-stub', 'fabric:test-addon', 'neoforge', 'forge', 'bukkit', 'paper', 'velocity', 'bungeecord')
+// Forge is not maintained for the 26.3 release line; keep it out of Gradle configuration.
+include('api', 'common', 'common-client', 'common-proxy', 'fabric', 'fabric:api-stub', 'fabric:test-addon', 'neoforge', /*'forge', */'bukkit', 'paper', 'velocity', 'bungeecord')
