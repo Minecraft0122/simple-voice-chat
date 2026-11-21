@@ -20,8 +20,14 @@ public class VolumeCategoryImpl implements VolumeCategory {
     private final String descriptionTranslationKey;
     @Nullable
     private final int[][] icon;
+    @Nullable
+    private final String parent;
 
     public VolumeCategoryImpl(String id, String name, @Nullable String nameTranslationKey, @Nullable String description, @Nullable String descriptionTranslationKey, @Nullable int[][] icon) {
+        this(id, name, nameTranslationKey, description, descriptionTranslationKey, icon, null);
+    }
+
+    public VolumeCategoryImpl(String id, String name, @Nullable String nameTranslationKey, @Nullable String description, @Nullable String descriptionTranslationKey, @Nullable int[][] icon, @Nullable String parent) {
         if (!ID_REGEX.matcher(id).matches()) {
             throw new IllegalArgumentException("Volume category ID can only contain a-z and _ with a maximum amount of 16 characters");
         }
@@ -31,6 +37,7 @@ public class VolumeCategoryImpl implements VolumeCategory {
         this.description = description;
         this.descriptionTranslationKey = descriptionTranslationKey;
         this.icon = icon;
+        this.parent = parent;
     }
 
     @Override
@@ -65,6 +72,12 @@ public class VolumeCategoryImpl implements VolumeCategory {
     @Override
     public int[][] getIcon() {
         return icon;
+    }
+
+    @Override
+    @Nullable
+    public String getParent() {
+        return parent;
     }
 
     public static VolumeCategoryImpl fromBytes(FriendlyByteBuf buf) {
@@ -151,6 +164,8 @@ public class VolumeCategoryImpl implements VolumeCategory {
         private String descriptionTranslationKey;
         @Nullable
         private int[][] icon;
+        @Nullable
+        private String parent;
 
         @Override
         public Builder setId(String id) {
@@ -189,6 +204,12 @@ public class VolumeCategoryImpl implements VolumeCategory {
         }
 
         @Override
+        public Builder setParent(@Nullable String parent) {
+            this.parent = parent;
+            return this;
+        }
+
+        @Override
         public VolumeCategory build() {
             if (id == null) {
                 throw new IllegalStateException("id missing");
@@ -196,7 +217,7 @@ public class VolumeCategoryImpl implements VolumeCategory {
             if (name == null) {
                 throw new IllegalStateException("name missing");
             }
-            return new VolumeCategoryImpl(id, name, nameTranslationKey, description, descriptionTranslationKey, icon);
+            return new VolumeCategoryImpl(id, name, nameTranslationKey, description, descriptionTranslationKey, icon, parent);
         }
     }
 

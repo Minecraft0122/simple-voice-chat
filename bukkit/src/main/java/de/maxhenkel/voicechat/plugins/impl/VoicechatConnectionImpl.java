@@ -106,6 +106,36 @@ public class VoicechatConnectionImpl implements VoicechatConnection {
     }
 
     @Override
+    public boolean isMuted() {
+        return false;
+    }
+
+    @Override
+    public void setMuted(boolean muted) {
+        // The legacy player-state protocol does not carry microphone mute state.
+    }
+
+    @Override
+    public boolean isForceMuted() {
+        return false;
+    }
+
+    @Override
+    public boolean isForceDisabled() {
+        return false;
+    }
+
+    @Override
+    public void evaluateForcedState() {
+        // The legacy protocol does not support forced player states.
+    }
+
+    @Override
+    public void evaluateVisibility() {
+        // The legacy protocol does not support visibility events.
+    }
+
+    @Override
     public void setDisabled(boolean disabled) {
         if (isInstalled()) {
             return;

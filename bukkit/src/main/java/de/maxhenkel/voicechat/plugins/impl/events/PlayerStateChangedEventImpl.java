@@ -26,6 +26,21 @@ public class PlayerStateChangedEventImpl extends ServerEventImpl implements Play
     }
 
     @Override
+    public boolean isMuted() {
+        return false;
+    }
+
+    @Override
+    public boolean isForceMuted() {
+        return false;
+    }
+
+    @Override
+    public boolean isForceDisabled() {
+        return false;
+    }
+
+    @Override
     public boolean isDisconnected() {
         return state.isDisconnected();
     }
