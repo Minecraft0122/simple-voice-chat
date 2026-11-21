@@ -1,10 +1,11 @@
 package de.maxhenkel.voicechat.voice.common;
 
 import de.maxhenkel.voicechat.Voicechat;
-import de.maxhenkel.voicechat.api.RawUdpPacket;
 import de.maxhenkel.voicechat.debug.PingHandler;
 import de.maxhenkel.voicechat.util.FriendlyByteBuf;
 import de.maxhenkel.voicechat.voice.server.ClientConnection;
+import de.maxhenkel.voicechat.voice.server.ConnectionSecret;
+import de.maxhenkel.voicechat.voice.server.UdpPacket;
 import de.maxhenkel.voicechat.voice.server.Server;
 import io.netty.buffer.Unpooled;
 import io.netty.handler.codec.DecoderException;
@@ -26,13 +27,13 @@ import java.util.UUID;
 public class NetworkMessage {
 
     public static final byte MAGIC_BYTE = (byte) 0b11111111;
+    public static final int NONCE_SIZE_BYTES = 16;
 
     private final long timestamp;
     private Packet<? extends Packet> packet;
     private SocketAddress address;
-    private UUID sender;
-
-    public UUID getSenderUUID() { return sender; }
+    @Nullable
+    private UUID connectionId;
 
     public NetworkMessage(long timestamp, Packet<?> packet) {
         this(timestamp);
@@ -40,7 +41,7 @@ public class NetworkMessage {
     }
 
     public NetworkMessage(Packet<?> packet) {
-        this(System.currentTimeMillis());
+        this(Utils.getMilliseconds());
         this.packet = packet;
     }
 
@@ -65,6 +66,14 @@ public class NetworkMessage {
         return address;
     }
 
+    /**
+     * @return the connection ID whose secret decrypted this message or null if the message was not received by the server
+     */
+    @Nullable
+    public UUID getConnectionId() {
+        return connectionId;
+    }
+
     private static final Map<Byte, Class<? extends Packet>> packetRegistry;
 
     static {
@@ -85,7 +94,7 @@ public class NetworkMessage {
     }
 
     @Nullable
-    public static NetworkMessage readPacketServer(RawUdpPacket packet, Server server) throws IllegalAccessException, InstantiationException, InvocationTargetException, NoSuchMethodException {
+    public static NetworkMessage readPacketServer(UdpPacket packet, Server server) throws IllegalAccessException, InstantiationException, InvocationTargetException, NoSuchMethodException {
         try {
             byte[] data = packet.getData();
             FriendlyByteBuf b = new FriendlyByteBuf(Unpooled.wrappedBuffer(data));
@@ -93,33 +102,21 @@ public class NetworkMessage {
                 Voicechat.LOGGER.debug("Received invalid packet from {}", packet.getSocketAddress());
                 return null;
             }
-            UUID playerID = b.readUUID();
-            if (!server.hasSecret(playerID)) {
-                if (PingHandler.onPacket(server, packet.getSocketAddress(), playerID, b)) {
+            UUID connectionId = b.readUUID();
+            ConnectionSecret connectionSecret = server.getConnectionSecrets().getByConnectionId(connectionId);
+            if (connectionSecret == null) {
+                if (PingHandler.onPacket(server, packet.getSocketAddress(), connectionId, b)) {
                     return null;
                 }
                 // Ignore packets if they are not from a player that has a secret
-                Voicechat.LOGGER.debug("Player {} does not have a secret", playerID);
+                Voicechat.LOGGER.debug("Connection {} does not have a secret", connectionId);
                 return null;
             }
-            if (!server.acceptsTransport(playerID, packet.getSocketAddress())) return null;
-            byte[] encrypted = b.readByteArray(Utils.MAX_VOICE_CHAT_PACKET_SIZE);
-            ClientConnection session = server.findVoiceSession(playerID, packet.getSocketAddress());
-            NetworkMessage decoded = readFromBytes(packet.getSocketAddress(), session == null ? server.getSecret(playerID) : session.getReadSecret(server), encrypted, packet.getTimestamp());
-            if (decoded == null && session != null) {
-                decoded = readFromBytes(packet.getSocketAddress(), server.getSecret(playerID), encrypted, packet.getTimestamp());
-                if (decoded != null && !(decoded.getPacket() instanceof AuthenticatePacket) && !(decoded.getPacket() instanceof AuthenticationResponsePacket)) return null;
+            NetworkMessage message = readFromBytes(packet.getSocketAddress(), connectionSecret.getSecret(), b.readByteArray(Utils.MAX_VOICE_CHAT_PACKET_SIZE), packet.getTimestamp());
+            if (message != null) {
+                message.connectionId = connectionId;
             }
-            if (session == null && decoded != null && !(decoded.getPacket() instanceof AuthenticatePacket) && !(decoded.getPacket() instanceof AuthenticationResponsePacket)) return null;
-            if (decoded != null) {
-                decoded.sender = playerID;
-                if (decoded.getPacket() instanceof AuthenticatePacket auth && !playerID.equals(auth.getPlayerUUID())) return null;
-                if (de.maxhenkel.voicechat.voice.transport.VoiceProtocol.LEGACY_UDP.matches(packet.getSocketAddress())
-                        && (decoded.getPacket() instanceof AuthenticationResponsePacket
-                        || decoded.getPacket() instanceof AuthenticationChallengePacket
-                        || decoded.getPacket() instanceof AvailabilityPacket)) return null;
-            }
-            return decoded;
+            return message;
         } catch (DecoderException | IndexOutOfBoundsException e) {
             Voicechat.LOGGER.debug("Received invalid packet from {}", packet.getSocketAddress());
             return null;
@@ -165,8 +162,8 @@ public class NetworkMessage {
         return -1;
     }
 
-    public byte[] writeServer(Server server, ClientConnection connection) throws InvalidAlgorithmParameterException, NoSuchPaddingException, IllegalBlockSizeException, NoSuchAlgorithmException, BadPaddingException, InvalidKeyException {
-        byte[] payload = write(connection.getWriteSecret(server, packet));
+    public byte[] writeServer(ClientConnection connection) throws InvalidAlgorithmParameterException, NoSuchPaddingException, IllegalBlockSizeException, NoSuchAlgorithmException, BadPaddingException, InvalidKeyException {
+        byte[] payload = write(connection.getConnectionSecret().getSecret());
         FriendlyByteBuf buffer = new FriendlyByteBuf(Unpooled.buffer(1 + payload.length));
         buffer.writeByte(MAGIC_BYTE);
         buffer.writeByteArray(payload);
@@ -177,10 +174,13 @@ public class NetworkMessage {
     }
 
     public byte[] write(Secret secret) throws InvalidAlgorithmParameterException, NoSuchPaddingException, IllegalBlockSizeException, NoSuchAlgorithmException, BadPaddingException, InvalidKeyException {
-        return secret.encrypt(writePlaintext());
+        return secret.encrypt(encode());
     }
 
-    public byte[] writePlaintext() {
+    /**
+     * @return the unencrypted payload
+     */
+    public byte[] encode() {
         FriendlyByteBuf buffer = new FriendlyByteBuf(Unpooled.buffer());
 
         byte type = getPacketType(packet);

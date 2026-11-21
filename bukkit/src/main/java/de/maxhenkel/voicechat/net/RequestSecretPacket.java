@@ -47,8 +47,8 @@ public class RequestSecretPacket implements Packet<RequestSecretPacket> {
     public String getTransportPreference() { return transportPreference; }
 
     private static int capability(int version) {
-        VoiceProtocol protocol = VoiceProtocol.fromVersion(version);
-        return protocol == null ? 0 : protocol.capabilityBit();
+        return version == VoiceProtocol.TCP.version() ? VoiceProtocol.TCP.capabilityBit()
+                : version >= 18 ? VoiceProtocol.LEGACY_UDP.capabilityBit() : 0;
     }
 
     @Override
@@ -70,7 +70,7 @@ public class RequestSecretPacket implements Packet<RequestSecretPacket> {
             transportPreference = buf.readUtf(32);
         } else {
             transportCapabilities = capability(compatibilityVersion);
-            transportPreference = compatibilityVersion == 20 ? "udp" : "tcp";
+            transportPreference = compatibilityVersion == VoiceProtocol.TCP.version() ? "tcp" : "udp";
         }
         return this;
     }

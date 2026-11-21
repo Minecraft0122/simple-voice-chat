@@ -20,14 +20,8 @@ public final class VoicechatBootstrap implements PluginBootstrap {
 
     @Override
     public void bootstrap(BootstrapContext context) {
-        // Paper registers bootstrap commands before onEnable. Do not leave command
-        // callbacks behind when onEnable later rejects a jar for another MC version.
-        try {
-            if (!BuildConstants.MINECRAFT_VERSION.equals(ServerBuildInfo.buildInfo().minecraftVersionId())) {
-                return;
-            }
-        } catch (Throwable ignored) {
-            // The plugin's onEnable version check will report the incompatibility.
+        // Prevent command registration on unsupported MC versions
+        if (!VoicechatPaperPlugin.isSupportedMinecraftVersion()) {
             return;
         }
         LifecycleEventManager<BootstrapContext> lifecycleManager = context.getLifecycleManager();

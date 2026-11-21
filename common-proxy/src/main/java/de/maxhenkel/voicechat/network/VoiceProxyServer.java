@@ -1,8 +1,9 @@
 package de.maxhenkel.voicechat.network;
 
 import de.maxhenkel.voicechat.VoiceProxy;
-import de.maxhenkel.voicechat.sniffer.VoiceProxySniffer;
-import de.maxhenkel.voicechat.voice.transport.*;
+import de.maxhenkel.voicechat.debug.PingHandler;
+import de.maxhenkel.voicechat.sniffer.SniffedSecretPacket;
+
 import java.io.IOException;
 import java.net.*;
 import java.nio.ByteBuffer;
@@ -215,10 +216,49 @@ public class VoiceProxyServer extends Thread {
         } catch (IOException e) { receiver.close(); }
     }
 
-    private boolean canReceive(ProxyVoiceSession connection) {
-        if (connection == null || !connection.validated || connection.isClosed() || !currentIdentity(connection)) return false;
-        VoiceProxySniffer.RoutingState state = voiceProxy.getSniffer().getRoutingState(connection.proxyPlayer);
-        return state != null && state.generation() == connection.generation && (state.status() == VoiceAvailability.AVAILABLE || state.status() == VoiceAvailability.NO_PERMISSION);
+    /**
+     * Handles a single incoming datagram by figuring out which player it belongs to and relaying it to the appropriate backend server.
+     * Any invalid datagram packets will be discarded silently.
+     *
+     * @param packet The datagram that was received on the public UDP socket
+     */
+    private void handlePacket(DatagramPacket packet) throws IOException {
+        // The first byte in the datagram must match the magic byte, else this is not a valid SimpleVoiceChat packet
+        ByteBuffer bb = ByteBuffer.wrap(packet.getData(), 0, packet.getLength());
+        if (bb.get() != (byte) 0b11111111) {
+            return;
+        }
+
+        // The connection ID comes right after the magic byte in the form of two longs
+        UUID connectionId = new UUID(bb.getLong(), bb.getLong());
+
+        if (PingHandler.onPacket(this, packet.getSocketAddress(), connectionId, bb)) {
+            return;
+        }
+
+        UUID playerUuid = voiceProxy.getSniffer().getMappedPlayerUUID(connectionId);
+        if (playerUuid == null) {
+            return;
+        }
+
+        VoiceProxyBridgeManager.VoiceProxyBridge bridge = voiceProxyBridgeManager.getBridge(playerUuid);
+        if (bridge == null) {
+            SniffedSecretPacket secretPacket = voiceProxy.getSniffer().getSecretPacket(playerUuid);
+            if (secretPacket == null || !secretPacket.isLegitimateAuthPacket(bb)) {
+                return;
+            }
+            bridge = voiceProxyBridgeManager.getOrCreateBridge(playerUuid, packet.getSocketAddress());
+            if (bridge == null) {
+                return;
+            }
+        }
+
+        // Only the address that opened the bridge may use it, so copied packets can't be injected from anywhere else
+        if (!bridge.getPlayerAddress().equals(packet.getSocketAddress())) {
+            return;
+        }
+
+        bridge.forward(packet);
     }
 
     private boolean currentIdentity(ProxyVoiceSession connection) {

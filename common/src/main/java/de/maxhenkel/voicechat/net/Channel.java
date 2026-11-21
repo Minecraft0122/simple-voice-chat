@@ -2,6 +2,7 @@ package de.maxhenkel.voicechat.net;
 
 import de.maxhenkel.voicechat.Voicechat;
 import de.maxhenkel.voicechat.intercompatibility.CommonCompatibilityManager;
+import de.maxhenkel.voicechat.legacy.LegacyCompatibility;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 
@@ -21,16 +22,25 @@ public class Channel<T extends Packet<T>> {
     }
 
     public void onServerPacket(ServerPlayer player, T packet) {
-        if (Voicechat.SERVER.getServer() == null) return;
-        CommonCompatibilityManager.INSTANCE.executeForPlayer(Voicechat.SERVER.getServer().getServer(), player, () -> {
-            if (!(packet instanceof ProxyControlPacket && Voicechat.SERVER_CONFIG.isProxyMode()) && !Voicechat.SERVER.getRateLimiter().allow(player.getUUID())) {
-                Voicechat.LOGGER.warn("Player {} exceeded packet rate limit", player.getName().getString());
-                player.connection.disconnect(Component.translatableWithFallback("disconnect.exceeded_packet_rate", "Kicked for exceeding packet rate limit"));
-                return;
+        if (!Voicechat.SERVER.getRateLimiter().allow(player.getUUID())) {
+            Voicechat.LOGGER.warn("Player {} exceeded packet rate limit", player.getName().getString());
+            player.connection.disconnect(Component.translatableWithFallback("disconnect.exceeded_packet_rate", "Kicked for exceeding packet rate limit"));
+            return;
+        }
+        CommonCompatibilityManager.INSTANCE.execute(player.level().getServer(), () -> {
+            T translatedPacket = LegacyCompatibility.translateIncoming(player, packet);
+            if (translatedPacket != null) {
+                notifyServerListener(player, translatedPacket);
             }
             if (!player.connection.isAcceptingMessages()) return;
             if (serverListener != null) serverListener.onPacket(player, packet);
         }, () -> {});
+    }
+
+    public void notifyServerListener(ServerPlayer player, T packet) {
+        if (serverListener != null) {
+            serverListener.onPacket(player, packet);
+        }
     }
 
 }

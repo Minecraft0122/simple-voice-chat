@@ -179,7 +179,6 @@ public class ClientVoicechatSocketImpl implements ClientVoicechatSocket {
 
     @Override
     public boolean isClosed() {
-        TcpConnection current = connection;
-        return closed || (protocolVersion == 20 ? datagramSocket == null || datagramSocket.isClosed() : current != null && current.isClosed());
+        return socket == null || socket.isClosed();
     }
 }

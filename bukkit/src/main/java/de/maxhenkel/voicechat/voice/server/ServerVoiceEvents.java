@@ -6,6 +6,8 @@ import de.maxhenkel.voicechat.voice.transport.TransportMode;
 import de.maxhenkel.voicechat.Voicechat;
 import de.maxhenkel.voicechat.compatibility.PlayerHideEvent;
 import de.maxhenkel.voicechat.compatibility.PlayerShowEvent;
+import de.maxhenkel.voicechat.debug.CooldownTimer;
+import de.maxhenkel.voicechat.legacy.LegacyCompatibility;
 import de.maxhenkel.voicechat.net.NetManager;
 import de.maxhenkel.voicechat.net.PacketRateLimiter;
 import de.maxhenkel.voicechat.net.RequestSecretPacket;
@@ -13,7 +15,6 @@ import de.maxhenkel.voicechat.net.SecretPacket;
 import de.maxhenkel.voicechat.net.VersionPacket;
 import de.maxhenkel.voicechat.voice.transport.VoiceVersion;
 import de.maxhenkel.voicechat.plugins.PluginManager;
-import de.maxhenkel.voicechat.voice.common.Secret;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -28,6 +29,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public class ServerVoiceEvents implements Listener {
 
     private final Map<UUID, Integer> clientCompatibilities;
+    private final Map<UUID, VoiceProtocol> clientProtocols = new ConcurrentHashMap<>();
     private final java.util.Set<UUID> extendedClients = ConcurrentHashMap.newKeySet();
     private final java.util.Set<UUID> versionReported = ConcurrentHashMap.newKeySet();
     private final java.util.Set<UUID> versionWarnings = ConcurrentHashMap.newKeySet();
@@ -68,22 +70,23 @@ public class ServerVoiceEvents implements Listener {
             return;
         }
 
-        if (packet.hasTransportExtension()) extendedClients.add(playerUUID);
-        if (!versionReported.contains(playerUUID) && versionWarnings.add(playerUUID)) {
-            String message = VoiceVersion.unverified(packet.getCompatibilityVersion(), Voicechat.INSTANCE.getDescription().getVersion());
-            Voicechat.LOGGER.warn("Player {} ({}): {}", player.getName(), playerUUID, message);
-            player.sendMessage(message);
-        }
-
-        VoiceProtocol selected = VoiceProtocol.fromVersion(packet.getCompatibilityVersion()) == null ? null
-                : TransportMode.parse(Voicechat.SERVER_CONFIG.transportMode.get())
+        VoiceProtocol selected = TransportMode.parse(Voicechat.SERVER_CONFIG.transportMode.get())
                 .select(Voicechat.SERVER_CONFIG.transportPreference.get(), packet.getTransportCapabilities());
         if (selected == null) {
+            Voicechat.LOGGER.warn("Client {} supports no enabled voice transport", player.getName());
+            sendIncompatibleMessage(player, packet.getCompatibilityVersion());
+            return;
+        }
+        Integer previousCompatibility = clientCompatibilities.putIfAbsent(playerUUID, packet.getCompatibilityVersion());
+        VoiceProtocol previousProtocol = clientProtocols.putIfAbsent(playerUUID, selected);
+        if ((previousCompatibility != null && previousCompatibility != packet.getCompatibilityVersion())
+                || (previousProtocol != null && previousProtocol != selected)) return;
+        if (packet.hasTransportExtension()) extendedClients.add(playerUUID);
+        else extendedClients.remove(playerUUID);
+        if (!isCompatible(player)) {
             Voicechat.LOGGER.warn("Connected client {} has incompatible voice chat version (server={}, client={})", player.getName(), Voicechat.COMPATIBILITY_VERSION, packet.getCompatibilityVersion());
             sendIncompatibleMessage(player, packet.getCompatibilityVersion());
         } else {
-            Integer previous = clientCompatibilities.putIfAbsent(playerUUID, selected.version());
-            if (previous != null && previous != selected.version()) return;
             initializePlayerConnection(player);
         }
     }
@@ -107,11 +110,22 @@ public class ServerVoiceEvents implements Listener {
     }
 
     public VoiceProtocol getProtocol(UUID playerUuid) {
-        return VoiceProtocol.fromVersion(clientCompatibilities.getOrDefault(playerUuid, -1));
+        return clientProtocols.get(playerUuid);
     }
 
     public boolean isCompatible(UUID playerUuid) {
-        return supportsVersion(clientCompatibilities.getOrDefault(playerUuid, -1));
+        int compatibilityVersion = getCompatibilityVersion(playerUuid);
+        return compatibilityVersion == Voicechat.COMPATIBILITY_VERSION
+                || compatibilityVersion == VoiceProtocol.TCP.version()
+                || LegacyCompatibility.isSupported(compatibilityVersion);
+    }
+
+    /**
+     * @param playerUuid the player UUID
+     * @return the compatibility version or -1 if not determined yet
+     */
+    public int getCompatibilityVersion(UUID playerUuid) {
+        return clientCompatibilities.getOrDefault(playerUuid, -1);
     }
 
     public static void sendIncompatibleMessage(Player player, int clientCompatibilityVersion) {
@@ -128,21 +142,29 @@ public class ServerVoiceEvents implements Listener {
         if (server == null) {
             return;
         }
+        ConnectionSecret connectionSecret = server.getConnectionSecrets().create(player.getUniqueId());
+        if (connectionSecret == null) {
+            if (Voicechat.debugMode()) {
+                Voicechat.LOGGER.warn("Player {} already requested secret - ignoring", player.getName());
+            } else {
+                CooldownTimer.run(String.format("already_requested_secret_%s", player.getUniqueId()), () -> {
+                    Voicechat.LOGGER.warn("Player {} already requested secret - ignoring", player.getName());
+                });
+            }
+            return;
+        }
+
         server.getPlayerStateManager().onPlayerCompatibilityCheckSucceeded(player);
         server.getCategoryManager().onPlayerCompatibilityCheckSucceeded(player);
         server.getGroupManager().onPlayerCompatibilityCheckSucceeded(player);
 
-        Secret secret = server.generateNewSecret(player.getUniqueId());
-        if (secret == null) {
-            Voicechat.LOGGER.warn("Player already requested secret - ignoring");
-            return;
-        }
-
         String voiceHost = PluginManager.instance().getVoiceHost(player, Voicechat.SERVER_CONFIG.voiceHost.get());
-        int advertisedPort = Voicechat.SERVER_CONFIG.isProxyMode() ? -1 : server.getPort();
-        NetManager.sendToClient(player, new SecretPacket(player, secret, advertisedPort, Voicechat.SERVER_CONFIG, voiceHost,
-                getProtocol(player.getUniqueId()).version()).withTransportExtension(extendedClients.contains(player.getUniqueId())));
-
+        VoiceProtocol protocol = clientProtocols.get(player.getUniqueId());
+        if (protocol == null) return;
+        NetManager.sendToClient(player, new SecretPacket(player, connectionSecret.getSecret(), connectionSecret.getConnectionId(), server.getPort(), protocol.version(), Voicechat.SERVER_CONFIG, voiceHost)
+                .withTransportExtension(extendedClients.contains(player.getUniqueId()))
+                .withConnectionIdExtension(clientCompatibilities.getOrDefault(player.getUniqueId(), -1) >= 21
+                        && clientCompatibilities.getOrDefault(player.getUniqueId(), -1) < VoiceProtocol.TCP.version()));
         Voicechat.LOGGER.info("Sent secret to {}", player.getName());
     }
 
@@ -175,6 +197,7 @@ public class ServerVoiceEvents implements Listener {
         server.getGroupManager().onPlayerQuit(event);
 
         clientCompatibilities.remove(event.getPlayer().getUniqueId());
+        clientProtocols.remove(event.getPlayer().getUniqueId());
         extendedClients.remove(event.getPlayer().getUniqueId());
         versionReported.remove(event.getPlayer().getUniqueId());
         versionWarnings.remove(event.getPlayer().getUniqueId());
@@ -184,6 +207,7 @@ public class ServerVoiceEvents implements Listener {
         }
 
         server.disconnectClient(event.getPlayer().getUniqueId());
+        server.getPacketRateLimiter().onPlayerLoggedOut(event.getPlayer());
         Voicechat.LOGGER.info("Disconnecting client {}", event.getPlayer().getName());
     }
 

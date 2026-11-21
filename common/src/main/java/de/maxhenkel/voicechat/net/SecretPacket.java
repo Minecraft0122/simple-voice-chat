@@ -2,6 +2,7 @@ package de.maxhenkel.voicechat.net;
 
 import de.maxhenkel.voicechat.Voicechat;
 import de.maxhenkel.voicechat.config.ServerConfig;
+import de.maxhenkel.voicechat.voice.common.AudioUtils;
 import de.maxhenkel.voicechat.voice.common.Secret;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
@@ -15,6 +16,7 @@ public class SecretPacket implements Packet<SecretPacket> {
     public static final CustomPacketPayload.Type<SecretPacket> SECRET = new CustomPacketPayload.Type<>(Identifier.fromNamespaceAndPath(Voicechat.MODID, "secret"));
 
     private Secret secret;
+    private UUID connectionId;
     private int serverPort;
     private UUID playerUUID;
     private ServerConfig.Codec codec;
@@ -24,11 +26,17 @@ public class SecretPacket implements Packet<SecretPacket> {
     private boolean groupsEnabled;
     private String voiceHost;
     private boolean allowRecording;
-    private int transportProtocol = 1021;
+    private int transportProtocol = 20;
     private boolean transportExtension = true;
+    private boolean connectionIdExtension = true;
 
     public SecretPacket withTransportExtension(boolean enabled) {
         transportExtension = enabled;
+        return this;
+    }
+
+    public SecretPacket withConnectionIdExtension(boolean enabled) {
+        connectionIdExtension = enabled;
         return this;
     }
 
@@ -36,12 +44,9 @@ public class SecretPacket implements Packet<SecretPacket> {
 
     }
 
-    public SecretPacket(ServerPlayer player, Secret secret, int port, ServerConfig serverConfig, String voiceHost) {
-        this(player, secret, port, serverConfig, voiceHost, 1021);
-    }
-
-    public SecretPacket(ServerPlayer player, Secret secret, int port, ServerConfig serverConfig, String voiceHost, int transportProtocol) {
+    public SecretPacket(ServerPlayer player, Secret secret, UUID connectionId, int port, int transportProtocol, ServerConfig serverConfig, String voiceHost) {
         this.secret = secret;
+        this.connectionId = connectionId;
         this.serverPort = port;
         this.playerUUID = player.getUUID();
         this.codec = serverConfig.voiceChatCodec.get();
@@ -56,6 +61,10 @@ public class SecretPacket implements Packet<SecretPacket> {
 
     public Secret getSecret() {
         return secret;
+    }
+
+    public UUID getConnectionId() {
+        return connectionId;
     }
 
     public int getServerPort() {
@@ -99,10 +108,11 @@ public class SecretPacket implements Packet<SecretPacket> {
     @Override
     public SecretPacket fromBytes(FriendlyByteBuf buf) {
         secret = Secret.fromBytes(buf);
+        connectionId = buf.readUUID();
         serverPort = buf.readInt();
         playerUUID = buf.readUUID();
         codec = ServerConfig.Codec.values()[buf.readByte()];
-        mtuSize = buf.readInt();
+        mtuSize = Math.clamp(buf.readInt(), AudioUtils.MIN_MTU_SIZE, AudioUtils.MAX_MTU_SIZE);
         voiceChatDistance = buf.readDouble();
         keepAlive = buf.readInt();
         groupsEnabled = buf.readBoolean();
@@ -115,6 +125,7 @@ public class SecretPacket implements Packet<SecretPacket> {
     @Override
     public void toBytes(FriendlyByteBuf buf) {
         secret.toBytes(buf);
+        if (connectionIdExtension) buf.writeUUID(connectionId);
         buf.writeInt(serverPort);
         buf.writeUUID(playerUUID);
         buf.writeByte(codec.ordinal());

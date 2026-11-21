@@ -36,8 +36,8 @@ public class EnterPasswordScreen extends VoiceChatScreenBase {
         hoverAreas.clear();
         clearWidgets();
 
-        password = new GroupEditBox(font, guiLeft + 7, guiTop + 7 + (font.lineHeight + 5) * 2 - 5, xSize - 7 * 2, 14);
-        password.setMaxLength(32);
+        password = new GroupEditBox(font, guiLeft + 7, guiTop + 7 + (font.lineHeight + 5) * 2 - 5, xSize - 7 * 2, 14, Voicechat.GROUP_PASSWORD_REGEX);
+        password.setMaxLength(Voicechat.MAX_GROUP_PASSWORD_LENGTH);
         addRenderableWidget(password);
 
         joinGroup = Button.builder(JOIN_GROUP, button -> {

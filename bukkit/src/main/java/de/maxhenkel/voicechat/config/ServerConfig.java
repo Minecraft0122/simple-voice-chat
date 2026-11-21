@@ -18,6 +18,7 @@ public class ServerConfig {
     public final ConfigEntry<Codec> voiceChatCodec;
     public final ConfigEntry<Integer> voiceChatMtuSize;
     public final ConfigEntry<Integer> tcpRateLimit;
+    public final ConfigEntry<Integer> packetQueueSize;
     public final ConfigEntry<Integer> keepAlive;
     public final ConfigEntry<Boolean> groupsEnabled;
     public final ConfigEntry<String> voiceHost;
@@ -72,7 +73,44 @@ public class ServerConfig {
                         "Leave blank to use the 'server-ip' property from the 'server.properties' config file",
                         "To bind to the wildcard IP address, use '*'"
                 );
-
+        voiceChatDistance = builder
+                .doubleEntry("max_voice_distance", 48D, 1D, 1_000_000D,
+                        "The distance to which the voice can be heard"
+                );
+        whisperDistance = builder
+                .doubleEntry("whisper_distance", 24D, 1D, 1_000_000D,
+                        "The distance to which the voice can be heard when whispering"
+                );
+        voiceChatCodec = builder
+                .enumEntry("codec", Codec.VOIP,
+                        "The Opus codec",
+                        "Valid values are 'VOIP', 'AUDIO', and 'RESTRICTED_LOWDELAY'"
+                );
+        voiceChatMtuSize = builder
+                .integerEntry("mtu_size", AudioUtils.MAX_OPUS_PAYLOAD_SIZE, AudioUtils.MIN_MTU_SIZE, AudioUtils.MAX_MTU_SIZE,
+                        "The maximum size that audio packets are allowed to have (in bytes)",
+                        "Setting this to lower values might cause issues"
+                );
+        tcpRateLimit = builder
+                .integerEntry("tcp_rate_limit", 16, -1, 1024,
+                        "The maximum number of packets a player can send per second",
+                        "Set this to -1 to disable the rate limit - This must be greater than 0 in all other cases",
+                        "This only applies to voice chat packets that are sent through Minecrafts networking",
+                        "This affects actions like opening/joining/leaving voice chat groups or general state changes like disabling/enabling the voice chat"
+                );
+        packetQueueSize = builder
+                .integerEntry("packet_queue_size", 16384, 64, Integer.MAX_VALUE,
+                        "The maximum amount of packets that can be queued on the server before new ones are dropped"
+                );
+        keepAlive = builder
+                .integerEntry("keep_alive", 1000, 1000, Integer.MAX_VALUE,
+                        "The frequency at which keep-alive packets are sent (in milliseconds)",
+                        "Setting this to a higher value may result in timeouts"
+                );
+        groupsEnabled = builder
+                .booleanEntry("enable_groups", true,
+                        "If group chats are allowed"
+                );
         voiceHost = builder
                 .stringEntry("voice_host", "",
                         "The hostname that clients should use to connect to the voice chat",

@@ -3,13 +3,12 @@ package de.maxhenkel.voicechat.voice.client;
 import de.maxhenkel.voicechat.Voicechat;
 import de.maxhenkel.voicechat.VoicechatClient;
 import de.maxhenkel.voicechat.debug.CooldownTimer;
-import de.maxhenkel.voicechat.gui.onboarding.OnboardingManager;
-import de.maxhenkel.voicechat.natives.ClientNativeManager;
 import de.maxhenkel.voicechat.plugins.ClientPluginManager;
 import de.maxhenkel.voicechat.intercompatibility.ClientCompatibilityManager;
 import de.maxhenkel.voicechat.voice.client.speaker.SpeakerException;
 import de.maxhenkel.voicechat.voice.common.NamedThreadPoolFactory;
 import de.maxhenkel.voicechat.voice.common.SoundPacket;
+import de.maxhenkel.voicechat.voice.common.Utils;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
@@ -26,9 +25,12 @@ import java.util.concurrent.TimeUnit;
 
 public class ClientVoicechat {
 
+    private static final long RECONNECT_DELAY = 10_000L;
+
     @Nullable
     private volatile SoundManager soundManager;
     private final ExecutorService soundManagerExecutor;
+    private final DeviceTracker speakerDeviceTracker;
     private final Map<UUID, AudioChannel> audioChannels;
     private final TalkCache talkCache;
     @Nullable
@@ -40,52 +42,15 @@ public class ClientVoicechat {
     @Nullable
     private AudioRecorder recorder;
     private final long startTime;
-    private final Object connectionLock = new Object();
-    private volatile long connectionGeneration;
-    private volatile Thread reconnectThread;
-    private volatile boolean closed;
-    private boolean notifyingTransportFailure;
-    private volatile int availability = de.maxhenkel.voicechat.voice.transport.VoiceAvailability.WAITING;
-
-    public int getAvailability() { return availability; }
-
-    public boolean canSendAudio() {
-        return availability == de.maxhenkel.voicechat.voice.transport.VoiceAvailability.AVAILABLE;
-    }
-
-    /** A game-channel wait marks a backend change; never retry the previous backend's credentials. */
-    public void resetBackend() {
-        onVoiceChatDisconnected();
-        initializationData = null;
-        setAvailability(de.maxhenkel.voicechat.voice.transport.VoiceAvailability.WAITING);
-        ClientCompatibilityManager.INSTANCE.emitVoiceChatDisconnectedEvent();
-    }
-
-    public void setAvailability(int status) {
-        int previous = availability;
-        availability = status;
-        if (!canSendAudio()) closeMicThread();
-        if (status == de.maxhenkel.voicechat.voice.transport.VoiceAvailability.UNAVAILABLE
-                || status == de.maxhenkel.voicechat.voice.transport.VoiceAvailability.INTERNAL_ERROR) {
-            onVoiceChatDisconnected();
-            initializationData = null;
-            ClientCompatibilityManager.INSTANCE.emitVoiceChatDisconnectedEvent();
-        } else if (canSendAudio() && connection != null && connection.isInitialized() && micThread == null) {
-            startMicThread(connection);
-        }
-        if (previous != status && status != de.maxhenkel.voicechat.voice.transport.VoiceAvailability.WAITING) {
-            ChatUtils.sendModMessage(Component.translatable(de.maxhenkel.voicechat.voice.transport.VoiceAvailability.translationKey(status)));
-        }
-    }
-
-    @Nullable
-    private volatile ClientVoicechatConnection failedConnection;
+    private boolean reconnectScheduled;
+    private long reconnectTime;
 
     public ClientVoicechat() {
-        this.startTime = System.currentTimeMillis();
+        this.startTime = Utils.getMilliseconds();
         this.talkCache = new TalkCache();
         this.audioChannels = new HashMap<>();
         this.soundManagerExecutor = Executors.newSingleThreadExecutor(NamedThreadPoolFactory.create("VoicechatSoundManagerThread"));
+        this.speakerDeviceTracker = new DeviceTracker("speaker", SoundManager::getDefaultSpeaker, SoundManager::getAllSpeakers, VoicechatClient.CLIENT_CONFIG.speaker::get);
         reloadSoundManager();
     }
 
@@ -100,10 +65,11 @@ public class ClientVoicechat {
 
     public void onVoiceChatDisconnected() {
         closeMicThread();
-        if (notifyingTransportFailure) return;
-        ClientVoicechatConnection old;
-        synchronized (connectionLock) {
-            old = connection;
+        if (connection != null) {
+            if (!connection.isInitialized()) {
+                reconnectLater();
+            }
+            connection.close();
             connection = null;
             connectionGeneration++;
             failedConnection = null;
@@ -112,31 +78,38 @@ public class ClientVoicechat {
         if (old != null) old.close();
     }
 
-    public void connect(InitializationData data) throws Exception {
-        ClientVoicechatConnection old;
-        long generation;
-        synchronized (connectionLock) {
-            closed = false;
-            generation = ++connectionGeneration;
-            interruptReconnectLocked();
-            old = connection;
-            connection = null;
-            initializationData = data;
-            availability = de.maxhenkel.voicechat.voice.transport.VoiceAvailability.WAITING;
+    public void connect(InitializationData data) {
+        initializationData = data;
+        Voicechat.LOGGER.info("Connecting to voice chat server: '{}:{}'", initializationData.getServerIP(), initializationData.getServerPort());
+        openConnection();
+    }
+
+    private void openConnection() {
+        checkRenderThread();
+        reconnectScheduled = false;
+        try {
+            connection = new ClientVoicechatConnection(this, initializationData);
+        } catch (Exception e) {
+            Voicechat.LOGGER.error("Failed to connect to voice chat server", e);
+            reconnectLater();
+            return;
         }
-        if (old != null) old.close();
-        Voicechat.LOGGER.info("Connecting to voice chat server: '{}:{}'", data.getServerIP(), data.getServerPort());
-        ClientVoicechatConnection next = new ClientVoicechatConnection(this, data);
-        synchronized (connectionLock) {
-            if (closed || generation != connectionGeneration) {
-                next.close();
-                return;
-            }
-            connection = next;
+        connection.start();
+    }
+
+    private void reconnectLater() {
+        reconnectScheduled = true;
+        reconnectTime = Utils.getMilliseconds() + RECONNECT_DELAY;
+    }
+
+    public void tick() {
+        if (connection != null) {
+            connection.checkTimeout();
+        } else if (reconnectScheduled && Utils.getMilliseconds() >= reconnectTime) {
+            Voicechat.LOGGER.info("Trying to connect to server again");
+            openConnection();
         }
-        next.start();
-        OnboardingManager.onConnecting();
-        ClientNativeManager.onConnecting();
+        submitSoundManagerTask(this::changeSpeakerIfNeeded);
     }
 
     void scheduleReconnect(ClientVoicechatConnection failed) {
@@ -245,16 +218,18 @@ public class ClientVoicechat {
     }
 
     public void reloadSoundManager() {
-        submitSoundManagerTask(() -> {
-            closeSoundManager();
-            try {
-                soundManager = SoundManager.create();
-            } catch (SpeakerException e) {
-                Voicechat.LOGGER.error("Failed to start sound manager", e);
-                Minecraft.getInstance().execute(() -> ChatUtils.sendModErrorMessage("message.voicechat.speaker_unavailable", e));
-            }
-            Minecraft.getInstance().execute(() -> ClientManager.getPlayerStateManager().onSpeakerAvailabilityChanged());
-        });
+        submitSoundManagerTask(this::restartSoundManager);
+    }
+
+    private void restartSoundManager() {
+        closeSoundManager();
+        try {
+            soundManager = SoundManager.create();
+        } catch (SpeakerException e) {
+            Voicechat.LOGGER.error("Failed to start sound manager", e);
+            sendSpeakerUnavailableMessage(e);
+        }
+        Minecraft.getInstance().execute(() -> ClientManager.getPlayerStateManager().onSpeakerAvailabilityChanged());
     }
 
     private void submitSoundManagerTask(Runnable task) {
@@ -270,6 +245,20 @@ public class ClientVoicechat {
             soundManager.close();
             soundManager = null;
         }
+    }
+
+    private void changeSpeakerIfNeeded() {
+        SoundManager soundManager = this.soundManager;
+        if (soundManager != null && soundManager.isDisconnected()) {
+            Voicechat.LOGGER.info("Speaker '{}' was disconnected", soundManager.getDeviceName());
+            restartSoundManager();
+        } else if (speakerDeviceTracker.shouldChangeDevice(soundManager != null, soundManager == null ? null : soundManager.getDeviceName())) {
+            restartSoundManager();
+        }
+    }
+
+    private static void sendSpeakerUnavailableMessage(SpeakerException e) {
+        ChatUtils.sendModErrorMessage("message.voicechat.speaker_unavailable", e);
     }
 
     public void reloadAudio() {
@@ -293,6 +282,7 @@ public class ClientVoicechat {
     }
 
     private void startMicThread(ClientVoicechatConnection connection) {
+        checkRenderThread();
         if (micThread != null) {
             micThread.close();
         }
@@ -300,18 +290,30 @@ public class ClientVoicechat {
             return;
         }
         micThread = new MicThread(this, connection, e -> {
-            Voicechat.LOGGER.error("Failed to start microphone thread", e);
+            Voicechat.LOGGER.error("Microphone error", e);
             ChatUtils.sendModErrorMessage("message.voicechat.microphone_unavailable", e);
         });
         micThread.start();
     }
 
     public void closeMicThread() {
+        checkRenderThread();
         if (micThread != null) {
             Voicechat.LOGGER.info("Stopping microphone thread");
             micThread.close();
             micThread = null;
         }
+    }
+
+    /**
+     * Changes to the connection and microphone thread must only be done on the main render thread, to avoid races
+     */
+    private static void checkRenderThread() {
+        if (Minecraft.getInstance().isSameThread()) {
+            return;
+        }
+        StackTraceElement stack = Thread.currentThread().getStackTrace()[2];
+        Voicechat.LOGGER.error("{} must be called on the render thread, but was called on '{}'", stack.getMethodName(), Thread.currentThread().getName());
     }
 
     public boolean toggleRecording() {
@@ -380,8 +382,13 @@ public class ClientVoicechat {
         return recorder;
     }
 
-    public long getStartTime() {
-        return startTime;
+    /**
+     * Used to avoid showing voice chat states while the client is still initializing.
+     *
+     * @return if its within 5 seconds of the client being initialized
+     */
+    public boolean isStartup() {
+        return Utils.getMilliseconds() - startTime < 5000L;
     }
 
     public Map<UUID, AudioChannel> getAudioChannels() {
@@ -390,11 +397,13 @@ public class ClientVoicechat {
 
     public boolean closeAudioChannel(UUID id) {
         synchronized (audioChannels) {
-            boolean removed = audioChannels.remove(id) != null;
-            if (removed) {
-                Voicechat.LOGGER.debug("Removed audio channel of {} due to disconnection from voice chat", id);
+            AudioChannel channel = audioChannels.remove(id);
+            if (channel == null) {
+                return false;
             }
-            return removed;
+            channel.closeAndKill();
+            Voicechat.LOGGER.debug("Removed audio channel of {} due to disconnection from voice chat", id);
+            return true;
         }
     }
 

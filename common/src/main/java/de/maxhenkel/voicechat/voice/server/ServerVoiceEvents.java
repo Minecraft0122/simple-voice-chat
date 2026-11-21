@@ -4,15 +4,16 @@ import de.maxhenkel.voicechat.BuildConstants;
 import de.maxhenkel.voicechat.voice.transport.VoiceProtocol;
 import de.maxhenkel.voicechat.voice.transport.TransportMode;
 import de.maxhenkel.voicechat.Voicechat;
+import de.maxhenkel.voicechat.debug.CooldownTimer;
 import de.maxhenkel.voicechat.intercompatibility.CommonCompatibilityManager;
 import de.maxhenkel.voicechat.intercompatibility.CrossSideManager;
+import de.maxhenkel.voicechat.legacy.LegacyCompatibility;
 import de.maxhenkel.voicechat.net.NetManager;
 import de.maxhenkel.voicechat.net.PacketRateLimiter;
 import de.maxhenkel.voicechat.net.SecretPacket;
 import de.maxhenkel.voicechat.net.VersionPacket;
 import de.maxhenkel.voicechat.voice.transport.VoiceVersion;
 import de.maxhenkel.voicechat.plugins.PluginManager;
-import de.maxhenkel.voicechat.voice.common.Secret;
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
@@ -28,6 +29,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public class ServerVoiceEvents {
 
     private final Map<UUID, Integer> clientCompatibilities;
+    private final Map<UUID, VoiceProtocol> clientProtocols = new ConcurrentHashMap<>();
     private final java.util.Set<UUID> extendedClients = ConcurrentHashMap.newKeySet();
     private final java.util.Set<UUID> versionReported = ConcurrentHashMap.newKeySet();
     private final java.util.Set<UUID> versionWarnings = ConcurrentHashMap.newKeySet();
@@ -54,21 +56,23 @@ public class ServerVoiceEvents {
         CommonCompatibilityManager.INSTANCE.getNetManager().versionChannel.setServerListener(this::onVersionPacket);
         CommonCompatibilityManager.INSTANCE.getNetManager().requestSecretChannel.setServerListener((player, packet) -> {
             Voicechat.LOGGER.info("Received secret request of {} ({})", player.getName().getString(), packet.getCompatibilityVersion());
-            if (packet.hasTransportExtension()) extendedClients.add(player.getUUID());
-            if (!versionReported.contains(player.getUUID()) && versionWarnings.add(player.getUUID())) {
-                String message = VoiceVersion.unverified(packet.getCompatibilityVersion(), CommonCompatibilityManager.INSTANCE.getModVersion());
-                Voicechat.LOGGER.warn("Player {} ({}): {}", player.getName().getString(), player.getUUID(), message);
-                player.sendSystemMessage(Component.literal(message));
-            }
-            VoiceProtocol selected = VoiceProtocol.fromVersion(packet.getCompatibilityVersion()) == null ? null
-                    : TransportMode.parse(Voicechat.SERVER_CONFIG.transportMode.get())
+            VoiceProtocol selected = TransportMode.parse(Voicechat.SERVER_CONFIG.transportMode.get())
                     .select(Voicechat.SERVER_CONFIG.transportPreference.get(), packet.getTransportCapabilities());
             if (selected == null) {
+                Voicechat.LOGGER.warn("Client {} supports no enabled voice transport", player.getName().getString());
+                player.sendSystemMessage(getIncompatibleMessage(packet.getCompatibilityVersion()));
+                return;
+            }
+            Integer previousCompatibility = clientCompatibilities.putIfAbsent(player.getUUID(), packet.getCompatibilityVersion());
+            VoiceProtocol previousProtocol = clientProtocols.putIfAbsent(player.getUUID(), selected);
+            if ((previousCompatibility != null && previousCompatibility != packet.getCompatibilityVersion())
+                    || (previousProtocol != null && previousProtocol != selected)) return;
+            if (packet.hasTransportExtension()) extendedClients.add(player.getUUID());
+            else extendedClients.remove(player.getUUID());
+            if (!isCompatible(player)) {
                 Voicechat.LOGGER.warn("Connected client {} has incompatible voice chat version (server={}, client={})", player.getName().getString(), Voicechat.COMPATIBILITY_VERSION, packet.getCompatibilityVersion());
                 player.sendSystemMessage(getIncompatibleMessage(packet.getCompatibilityVersion()));
             } else {
-                Integer previous = clientCompatibilities.putIfAbsent(player.getUUID(), selected.version());
-                if (previous != null && previous != selected.version()) return;
                 initializePlayerConnection(player);
             }
         });
@@ -104,11 +108,22 @@ public class ServerVoiceEvents {
     }
 
     public VoiceProtocol getProtocol(UUID playerUuid) {
-        return VoiceProtocol.fromVersion(clientCompatibilities.getOrDefault(playerUuid, -1));
+        return clientProtocols.get(playerUuid);
     }
 
     public boolean isCompatible(UUID playerUuid) {
-        return supportsVersion(clientCompatibilities.getOrDefault(playerUuid, -1));
+        int compatibilityVersion = getCompatibilityVersion(playerUuid);
+        return compatibilityVersion == Voicechat.COMPATIBILITY_VERSION
+                || compatibilityVersion == VoiceProtocol.TCP.version()
+                || LegacyCompatibility.isSupported(compatibilityVersion);
+    }
+
+    /**
+     * @param playerUuid the player UUID
+     * @return the compatibility version or -1 if not determined yet
+     */
+    public int getCompatibilityVersion(UUID playerUuid) {
+        return clientCompatibilities.getOrDefault(playerUuid, -1);
     }
 
     public void serverStarting(MinecraftServer mcServer) {
@@ -135,13 +150,19 @@ public class ServerVoiceEvents {
         if (server == null) {
             return;
         }
-        CommonCompatibilityManager.INSTANCE.emitPlayerCompatibilityCheckSucceeded(player);
-
-        Secret secret = server.generateNewSecret(player.getUUID());
-        if (secret == null) {
-            Voicechat.LOGGER.warn("Player already requested secret - ignoring");
+        ConnectionSecret connectionSecret = server.getConnectionSecrets().create(player.getUUID());
+        if (connectionSecret == null) {
+            if (Voicechat.debugMode()) {
+                Voicechat.LOGGER.warn("Player {} already requested secret - ignoring", player.getName().getString());
+            } else {
+                CooldownTimer.run(String.format("already_requested_secret_%s", player.getUUID()), () -> {
+                    Voicechat.LOGGER.warn("Player {} already requested secret - ignoring", player.getName().getString());
+                });
+            }
             return;
         }
+
+        CommonCompatibilityManager.INSTANCE.emitPlayerCompatibilityCheckSucceeded(player);
 
         // TODO Add back when they re-add P2P
         // Only does something if hosting P2P
@@ -154,10 +175,12 @@ public class ServerVoiceEvents {
             Voicechat.LOGGER.warn("A plugin modified voice_host on a non-dedicated server - Ignore this message if this is intended");
         }
 
-        int advertisedPort = Voicechat.SERVER_CONFIG.isProxyMode() ? -1 : server.getPort();
-        NetManager.sendToClient(player, new SecretPacket(player, secret, advertisedPort, Voicechat.SERVER_CONFIG, voiceHost,
-                getProtocol(player.getUUID()).version()).withTransportExtension(extendedClients.contains(player.getUUID())));
-
+        VoiceProtocol protocol = clientProtocols.get(player.getUUID());
+        if (protocol == null) return;
+        NetManager.sendToClient(player, new SecretPacket(player, connectionSecret.getSecret(), connectionSecret.getConnectionId(), server.getPort(), protocol.version(), Voicechat.SERVER_CONFIG, voiceHost)
+                .withTransportExtension(extendedClients.contains(player.getUUID()))
+                .withConnectionIdExtension(clientCompatibilities.getOrDefault(player.getUUID(), -1) >= 21
+                        && clientCompatibilities.getOrDefault(player.getUUID(), -1) < VoiceProtocol.TCP.version()));
         Voicechat.LOGGER.info("Sent secret to {}", player.getName().getString());
     }
 
@@ -193,6 +216,7 @@ public class ServerVoiceEvents {
 
     public void playerLoggedOut(ServerPlayer player) {
         clientCompatibilities.remove(player.getUUID());
+        clientProtocols.remove(player.getUUID());
         extendedClients.remove(player.getUUID());
         versionReported.remove(player.getUUID());
         versionWarnings.remove(player.getUUID());

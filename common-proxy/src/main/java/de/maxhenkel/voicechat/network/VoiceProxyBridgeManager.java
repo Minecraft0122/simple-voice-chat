@@ -43,15 +43,26 @@ public class VoiceProxyBridgeManager {
     }
 
     /**
-     * Disconnect the bridge for a given player
+     * Disconnect the bridge for a given player.
+     * This is synchronized with the bridge creation, so a bridge that is currently being created is disconnected as well.
      *
      * @param playerUUID Which player to disconnect the bridge for
      */
-    public void disconnect(UUID playerUUID) {
+    public synchronized void disconnect(UUID playerUUID) {
         VoiceProxyBridge bridge = bridgeMap.get(playerUUID);
         if (bridge != null) {
             bridge.interrupt();
         }
+    }
+
+    /**
+     * Gets the bridge for a given player UUID
+     *
+     * @param playerUUID Which player to get the bridge for
+     * @return The existing VoiceProxyBridge, <code>null</code> if there is none
+     */
+    public VoiceProxyBridge getBridge(UUID playerUUID) {
+        return bridgeMap.get(playerUUID);
     }
 
     /**
@@ -61,7 +72,7 @@ public class VoiceProxyBridgeManager {
      * @param playerAddress Which address to relay the packets back to
      * @return The existing or newly created VoiceProxyBridge, <code>null</code> if none could be created
      */
-    public VoiceProxyBridge getOrCreateBridge(UUID playerUUID, SocketAddress playerAddress) {
+    public synchronized VoiceProxyBridge getOrCreateBridge(UUID playerUUID, SocketAddress playerAddress) {
         return bridgeMap.computeIfAbsent(playerUUID, uuid -> {
             InetSocketAddress serverAddress = voiceProxy.getSniffer().getBackendSocket(uuid);
             if (serverAddress == null) {
@@ -196,6 +207,13 @@ public class VoiceProxyBridgeManager {
             }
             serverAddress = resolved;
             return true;
+        }
+
+        /**
+         * @return the address the player connected to the proxy from, which is the only address packets are forwarded from
+         */
+        public SocketAddress getPlayerAddress() {
+            return playerAddress;
         }
 
         /**

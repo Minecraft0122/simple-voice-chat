@@ -21,6 +21,11 @@ import java.util.function.Consumer;
 
 public class MicThread extends Thread {
 
+    /**
+     * To avoid duplicate mic usages, since some setups only allow one microphone
+     */
+    private static final Object MICROPHONE_LOCK = new Object();
+
     @Nullable
     private final ClientVoicechat client;
     @Nullable
@@ -33,6 +38,7 @@ public class MicThread extends Thread {
     private volatile boolean microphoneLocked;
     private final OpusEncoder encoder;
     private volatile MicrophoneProcessor microphoneProcessor;
+    private final DeviceTracker deviceTracker;
 
     private final Consumer<MicrophoneException> onError;
 
@@ -43,6 +49,7 @@ public class MicThread extends Thread {
         this.running = true;
         this.encoder = OpusManager.createEncoder(connection == null ? ServerConfig.Codec.VOIP.getMode() : connection.getData().getCodec().getMode());
         microphoneProcessor = createMicrophoneProcessor();
+        deviceTracker = new DeviceTracker("microphone", MicrophoneManager::getDefaultMicrophone, MicrophoneManager::deviceNames, VoicechatClient.CLIENT_CONFIG.microphone::get);
 
         setDaemon(true);
         setName("MicrophoneThread");
@@ -66,33 +73,29 @@ public class MicThread extends Thread {
 
     @Override
     public void run() {
-        Microphone mic = getMic();
-        if (mic == null) {
+        synchronized (MICROPHONE_LOCK) {
+            try {
+                processMicrophone();
+            } finally {
+                closeResources();
+            }
+        }
+    }
+
+    private void processMicrophone() {
+        if (getMic() == null) {
             return;
         }
 
         while (running) {
-            MicrophoneActivationType type = VoicechatClient.CLIENT_CONFIG.microphoneActivationType.get();
-            if (!type.equals(microphoneProcessor.getActivationType())) {
-                microphoneProcessor.close();
-                microphoneProcessor = createMicrophoneProcessor();
-            }
+            changeMicIfNeeded();
 
-            if (connection != null) {
-                // Checking here for timeouts, because we don't have any other looping thread
-                connection.checkTimeout();
-                if (!running) {
-                    break;
-                }
-            }
             if (microphoneLocked || ClientManager.getPlayerStateManager().isDisabled()) {
                 flushIfNeeded();
 
                 if (!microphoneLocked && ClientManager.getPlayerStateManager().isDisabled()) {
                     microphoneProcessor.reset();
-                    if (mic.isStarted()) {
-                        mic.stop();
-                    }
+                    stopMic();
                 }
 
                 Utils.sleep(10);
@@ -114,18 +117,58 @@ public class MicThread extends Thread {
 
     @Nullable
     public short[] pollMic() {
-        Microphone mic = getMic();
+        short[] audio = readMic();
+        if (audio == null) {
+            Utils.sleep(5);
+        }
+        return audio;
+    }
+
+    @Nullable
+    private synchronized short[] readMic() {
         if (mic == null) {
-            throw new IllegalStateException("No microphone available");
+            return null;
         }
         if (!mic.isStarted()) {
             mic.start();
         }
         if (mic.available() < AudioUtils.FRAME_SIZE) {
-            Utils.sleep(5);
             return null;
         }
         return mic.read();
+    }
+
+    private synchronized void changeMicIfNeeded() {
+        if (mic != null && mic.isDisconnected()) {
+            Voicechat.LOGGER.info("Microphone '{}' was disconnected", mic.getDeviceName());
+            changeMic();
+        } else if (deviceTracker.shouldChangeDevice(mic != null, mic == null ? null : mic.getDeviceName())) {
+            changeMic();
+        }
+    }
+
+    private void changeMic() {
+        if (mic != null) {
+            mic.close();
+            mic = null;
+        }
+        microphoneProcessor.reset();
+        flushIfNeeded();
+        try {
+            openMic();
+        } catch (MicrophoneException e) {
+            onError.accept(e);
+        }
+    }
+
+    public synchronized boolean isMicrophoneAvailable() {
+        return mic != null;
+    }
+
+    private synchronized void stopMic() {
+        if (mic != null && mic.isStarted()) {
+            mic.stop();
+        }
     }
 
     @Nullable
@@ -134,27 +177,41 @@ public class MicThread extends Thread {
         if (audio == null) {
             return null;
         }
+        // Always do this here to ensure the thread that processes audio can do it
+        MicrophoneActivationType type = VoicechatClient.CLIENT_CONFIG.microphoneActivationType.get();
+        if (!type.equals(microphoneProcessor.getActivationType())) {
+            microphoneProcessor.close();
+            microphoneProcessor = createMicrophoneProcessor();
+        }
         microphoneProcessor.process(audio, testing);
         return audio;
     }
 
     @Nullable
-    private Microphone getMic() {
+    private synchronized Microphone getMic() {
         if (!running) {
             return null;
         }
         if (mic == null) {
             try {
-                mic = MicrophoneManager.createMicrophone();
-                Minecraft.getInstance().execute(ClientManager.instance()::checkMicrophonePermissions);
+                openMic();
             } catch (MicrophoneException e) {
-                onError.accept(e);
-                microphoneError = e;
-                running = false;
+                stopWithError(e);
                 return null;
             }
         }
         return mic;
+    }
+
+    private void openMic() throws MicrophoneException {
+        mic = MicrophoneManager.createMicrophone();
+        Minecraft.getInstance().execute(ClientManager.instance()::checkMicrophonePermissions);
+    }
+
+    private void stopWithError(MicrophoneException e) {
+        onError.accept(e);
+        microphoneError = e;
+        running = false;
     }
 
     private void flush() {
@@ -207,11 +264,11 @@ public class MicThread extends Thread {
     }
 
     public boolean isTalking() {
-        return !microphoneLocked && microphoneProcessor.shouldTransmitAudio();
+        return running && !microphoneLocked && microphoneProcessor.shouldTransmitAudio();
     }
 
     public boolean isWhispering() {
-        return microphoneProcessor.isWhispering();
+        return running && microphoneProcessor.isWhispering();
     }
 
     public boolean shouldTransmitAudio() {
@@ -223,23 +280,17 @@ public class MicThread extends Thread {
         microphoneProcessor.reset();
     }
 
+    /**
+     * Stops the thread, which then closes the microphone by itself, so it isn't closed while still being in use.
+     */
     public void close() {
-        if (!running) {
-            return;
-        }
         running = false;
+    }
 
-        if (Thread.currentThread() != this) {
-            try {
-                join(100);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                Voicechat.LOGGER.error("Interrupted while waiting for mic thread to close", e);
-            }
-        }
-
+    private synchronized void closeResources() {
         if (mic != null) {
             mic.close();
+            mic = null;
         }
         encoder.close();
         microphoneProcessor.close();
@@ -260,7 +311,7 @@ public class MicThread extends Thread {
         }
         try {
             if (client != null && client.getRecorder() != null) {
-                client.getRecorder().appendChunk(Minecraft.getInstance().getUser().getProfileId(), System.currentTimeMillis(), PositionalAudioUtils.convertToStereo(audio));
+                client.getRecorder().appendChunk(Minecraft.getInstance().getUser().getProfileId(), Utils.getMilliseconds(), PositionalAudioUtils.convertToStereo(audio));
             }
         } catch (IOException e) {
             Voicechat.LOGGER.error("Failed to record audio", e);

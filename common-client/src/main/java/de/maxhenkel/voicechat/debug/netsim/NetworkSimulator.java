@@ -1,0 +1,135 @@
+package de.maxhenkel.voicechat.debug.netsim;
+
+import de.maxhenkel.voicechat.Voicechat;
+import de.maxhenkel.voicechat.intercompatibility.CommonCompatibilityManager;
+
+import javax.annotation.Nullable;
+import javax.management.ObjectName;
+import java.lang.management.ManagementFactory;
+
+/**
+ * Used to simulate poor network conditions.
+ * This is only active if you are in a development environment or have <code>-Dvoicechat.netsim</code> set.
+ * Change values by running <code>jconsole</code>.
+ */
+public class NetworkSimulator implements NetworkSimulatorMBean {
+
+    public static final NetworkSimulator INSTANCE = new NetworkSimulator();
+
+    private volatile double lossProbability;
+    private volatile double duplicateProbability;
+    private volatile double reorderProbability;
+    private volatile int delayMillis;
+    private volatile int jitterMillis;
+    private volatile boolean socketErrorOnConnect;
+    @Nullable
+    private volatile SimulatedClientVoicechatSocket socket;
+
+    public static boolean isEnabled() {
+        return CommonCompatibilityManager.INSTANCE.isDevEnvironment() || System.getProperty("voicechat.netsim") != null;
+    }
+
+    public static void register() {
+        try {
+            ManagementFactory.getPlatformMBeanServer().registerMBean(INSTANCE, new ObjectName("de.maxhenkel.voicechat:type=NetworkSimulator"));
+            Voicechat.LOGGER.info("Registered network simulator MBean");
+        } catch (Exception e) {
+            Voicechat.LOGGER.error("Failed to register network simulator MBean", e);
+        }
+    }
+
+    public void setSocket(SimulatedClientVoicechatSocket socket) {
+        this.socket = socket;
+    }
+
+    public boolean isActive() {
+        return lossProbability > 0D || duplicateProbability > 0D || reorderProbability > 0D || delayMillis != 0 || jitterMillis != 0;
+    }
+
+    @Override
+    public double getLossProbability() {
+        return lossProbability;
+    }
+
+    @Override
+    public void setLossProbability(double lossProbability) {
+        this.lossProbability = lossProbability;
+    }
+
+    @Override
+    public double getDuplicateProbability() {
+        return duplicateProbability;
+    }
+
+    @Override
+    public void setDuplicateProbability(double duplicateProbability) {
+        this.duplicateProbability = duplicateProbability;
+    }
+
+    @Override
+    public double getReorderProbability() {
+        return reorderProbability;
+    }
+
+    @Override
+    public void setReorderProbability(double reorderProbability) {
+        this.reorderProbability = reorderProbability;
+    }
+
+    @Override
+    public int getDelayMillis() {
+        return delayMillis;
+    }
+
+    @Override
+    public void setDelayMillis(int delayMillis) {
+        this.delayMillis = delayMillis;
+    }
+
+    @Override
+    public int getJitterMillis() {
+        return jitterMillis;
+    }
+
+    @Override
+    public void setJitterMillis(int jitterMillis) {
+        if (jitterMillis < 0) {
+            throw new IllegalArgumentException("Jitter can't be negative");
+        }
+        this.jitterMillis = jitterMillis;
+    }
+
+    @Override
+    public boolean isSocketErrorOnConnect() {
+        return socketErrorOnConnect;
+    }
+
+    @Override
+    public void setSocketErrorOnConnect(boolean socketErrorOnConnect) {
+        this.socketErrorOnConnect = socketErrorOnConnect;
+    }
+
+    @Override
+    public void dropAll() {
+        lossProbability = 1D;
+    }
+
+    @Override
+    public void reset() {
+        lossProbability = 0D;
+        duplicateProbability = 0D;
+        reorderProbability = 0D;
+        delayMillis = 0;
+        jitterMillis = 0;
+        socketErrorOnConnect = false;
+    }
+
+    @Override
+    public void socketError() {
+        SimulatedClientVoicechatSocket s = socket;
+        if (s != null) {
+            s.simulateFailure();
+        }
+    }
+
+}

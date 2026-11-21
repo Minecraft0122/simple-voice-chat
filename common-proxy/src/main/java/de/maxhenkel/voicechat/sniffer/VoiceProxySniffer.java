@@ -13,11 +13,13 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /** Accepts identity and routing only from the player's current backend connection. */
 public class VoiceProxySniffer {
+
     private final VoiceProxy voiceProxy;
     private final Map<UUID, UUID> playerUUIDMap = new ConcurrentHashMap<>();
     private final Map<UUID, UUID> backendPlayerMap = new ConcurrentHashMap<>();
     private final Map<UUID, String> backendIds = new ConcurrentHashMap<>();
     private final Map<UUID, Integer> compatibilityVersionMap = new ConcurrentHashMap<>();
+    private final Map<UUID, VoiceProtocol> transportProtocolMap = new ConcurrentHashMap<>();
     private final Map<UUID, byte[]> secretMap = new ConcurrentHashMap<>();
     private final Map<UUID, RoutingState> routes = new ConcurrentHashMap<>();
     private final Map<UUID, Long> requestedAt = new ConcurrentHashMap<>();
@@ -37,7 +39,22 @@ public class VoiceProxySniffer {
     @Deprecated public InetSocketAddress getBackendSocket(UUID player) { return null; }
     @Deprecated public void resetBackendSocket(UUID player) {}
 
-    public synchronized ByteBuffer onPluginMessage(String channel, boolean fromServer, ByteBuffer message, UUID player) throws IncompatibleVoiceChatException {
+    /**
+     * Returns the players UUID on the proxy server.
+     *
+     * @param connectionId the connection ID in the header of the voice chat packet
+     * @return the UUID of the player on the proxy, <code>null</code> if the connection ID is unknown
+     */
+    /**
+     * Called whenever a PluginMessage has been received by the proxy.
+     *
+     * @param channel    the channel on which the message was received
+     * @param fromServer whether the message was sent from the server
+     * @param message    the contents of the received message
+     * @param playerUUID the UUID of the player that sent or received the message
+     * @return ByteBuffer if the plugin message should be replaced, <code>null</code> otherwise
+     */
+    public ByteBuffer onPluginMessage(String channel, boolean fromServer, ByteBuffer message, UUID playerUUID) throws IncompatibleVoiceChatException {
         if (!fromServer && VoiceProxy.isPrivateChannel(channel)) return ByteBuffer.allocate(0);
         if (!fromServer && channel.equals(VoiceProxy.VERSION_CHANNEL)) {
             try {
@@ -45,21 +62,22 @@ public class VoiceProxySniffer {
                 String release = VoiceVersion.sanitize(buf.readUtf(128));
                 int protocol = buf.readInt();
                 if (buf.getBuffer().hasRemaining()) throw new IllegalArgumentException("Trailing version data");
-                if (versionReported.add(player) && !VoiceVersion.matches(release, protocol, VoiceProxy.MOD_VERSION, VoiceProxy.COMPATIBILITY_VERSION)) {
-                    voiceProxy.getLogger().warn("Player {}: {}", player, VoiceVersion.mismatch(release, protocol, VoiceProxy.MOD_VERSION, VoiceProxy.COMPATIBILITY_VERSION));
+                if (versionReported.add(playerUUID) && !VoiceVersion.matches(release, protocol, VoiceProxy.MOD_VERSION, VoiceProxy.COMPATIBILITY_VERSION)) {
+                    voiceProxy.getLogger().warn("Player {}: {}", playerUUID, VoiceVersion.mismatch(release, protocol, VoiceProxy.MOD_VERSION, VoiceProxy.COMPATIBILITY_VERSION));
                 }
             } catch (RuntimeException e) {
                 throw new IncompatibleVoiceChatException("Invalid voice version announcement", e);
             }
             return null;
         }
-        if (!fromServer && channel.equals(VoiceProxy.REQUEST_SECRET_CHANNEL)) {
+        if (!fromServer && (channel.equals(VoiceProxy.REQUEST_SECRET_CHANNEL) || channel.equals(VoiceProxy.REQUEST_SECRET_CHANNEL_1_12))) {
             if (message.remaining() < 4) throw new IncompatibleVoiceChatException("Invalid secret request");
             int version = message.getInt();
-            if (VoiceProtocol.fromVersion(version) == null) {
+            if ((version < 18 || version > VoiceProxy.COMPATIBILITY_VERSION) && version != VoiceProtocol.TCP.version()) {
                 throw new IncompatibleVoiceChatException("Incompatible voice protocol: client=" + version + ", proxy=" + VoiceProxy.COMPATIBILITY_VERSION);
             }
-            int capabilities = VoiceProtocol.fromVersion(version) == VoiceProtocol.LEGACY_UDP ? 1 : 2;
+            int capabilities = version == VoiceProtocol.TCP.version()
+                    ? VoiceProtocol.TCP.capabilityBit() : VoiceProtocol.LEGACY_UDP.capabilityBit();
             boolean extended = message.hasRemaining();
             if (extended) {
                 capabilities = message.get() & 255;
@@ -68,12 +86,19 @@ public class VoiceProxySniffer {
             VoiceProtocol selected = TransportMode.parse(voiceProxy.getConfig().transportMode.get())
                     .select(voiceProxy.getConfig().transportPreference.get(), capabilities);
             if (selected == null) throw new IncompatibleVoiceChatException("No mutually supported voice transport");
-            Integer previous = compatibilityVersionMap.putIfAbsent(player, selected.version());
-            if (previous != null && previous != selected.version()) return ByteBuffer.allocate(0);
+            Integer previous = compatibilityVersionMap.putIfAbsent(player, version);
+            if (previous != null && previous != version) return ByteBuffer.allocate(0);
+            VoiceProtocol previousProtocol = transportProtocolMap.putIfAbsent(player, selected);
+            if (previousProtocol != null && previousProtocol != selected) return ByteBuffer.allocate(0);
             if (extended) extendedClients.add(player);
             requestedAt.put(player, System.currentTimeMillis());
             voiceProxy.availability(player, VoiceAvailability.WAITING);
-            return null;
+            if (!extended) return null;
+            ByteBufferWrapper forwarded = new ByteBufferWrapper(ByteBuffer.allocate(16));
+            forwarded.writeInt(version);
+            forwarded.writeByte((byte) selected.capabilityBit());
+            forwarded.writeUtf(selected == VoiceProtocol.TCP ? "tcp" : "udp", 32);
+            return ByteBuffer.wrap(forwarded.toBytes());
         }
         if (!fromServer) return null;
         try {
@@ -96,13 +121,14 @@ public class VoiceProxySniffer {
     }
 
     private ByteBuffer handleSecret(ByteBuffer message, UUID player) throws IncompatibleVoiceChatException {
-        Integer version = compatibilityVersionMap.get(player);
-        if (version == null || !TransportMode.parse(voiceProxy.getConfig().transportMode.get()).supports(VoiceProtocol.fromVersion(version))) {
+        Integer compatibilityVersion = compatibilityVersionMap.get(player);
+        VoiceProtocol protocol = transportProtocolMap.get(player);
+        if (compatibilityVersion == null || protocol == null || !TransportMode.parse(voiceProxy.getConfig().transportMode.get()).supports(protocol)) {
             internalError(player, "Missing or incompatible client protocol version");
             throw new IncompatibleVoiceChatException("Supported voice client and enabled transport required");
         }
-        SniffedSecretPacket packet = SniffedSecretPacket.fromBytes(message, version);
-        packet.setTransportProtocol(version);
+        SniffedSecretPacket packet = SniffedSecretPacket.fromBytes(message, compatibilityVersion);
+        packet.setTransportProtocol(protocol.version());
         packet.setTransportExtension(extendedClients.contains(player));
         if (packet.getServerPort() != -1) {
             internalError(player, "Backend must enable proxy_mode=true");
@@ -190,6 +216,7 @@ public class VoiceProxySniffer {
         }
         backendIds.remove(player);
         compatibilityVersionMap.remove(player);
+        transportProtocolMap.remove(player);
         extendedClients.remove(player);
         versionReported.remove(player);
         secretMap.remove(player);
@@ -199,7 +226,7 @@ public class VoiceProxySniffer {
     }
 
     public VoiceProtocol getProtocol(UUID player) {
-        return VoiceProtocol.fromVersion(compatibilityVersionMap.getOrDefault(player, -1));
+        return transportProtocolMap.get(player);
     }
 
     public byte[] getSecret(UUID player) {

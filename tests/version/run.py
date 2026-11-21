@@ -78,9 +78,9 @@ public class VersionTest {
   BUF modern=new BUF();new RequestSecretPacket(1021,3,"tcp,udp").toBytes(modern);modern.flip();
   check(new RequestSecretPacket().fromBytes(modern).hasTransportExtension()&&modern.remaining()==0,"modern request negotiated without new trailing fields");
   for(boolean extended:new boolean[]{false,true}){
-   BUF raw=new BUF();new SecretPacket(PLAYER,new Secret(),24454,new ServerConfig(),"",20).withTransportExtension(extended).toBytes(raw);raw.flip();
+   BUF raw=new BUF();new SecretPacket(PLAYER,new Secret(),java.util.UUID.randomUUID(),24454,20,new ServerConfig(),"").withTransportExtension(extended).toBytes(raw);raw.flip();
    // Independent upstream/tcp.2 reader: it ends after allowRecording.
-   for(int i=0;i<16;i++)raw.readByte();raw.readInt();raw.readUUID();raw.readByte();raw.readInt();raw.readDouble();raw.readInt();raw.readBoolean();raw.readUtf();raw.readBoolean();
+   for(int i=0;i<16;i++)raw.readByte();raw.readUUID();raw.readInt();raw.readUUID();raw.readByte();raw.readInt();raw.readDouble();raw.readInt();raw.readBoolean();raw.readUtf();raw.readBoolean();
    check(raw.remaining()==(extended?4:0),"secret layout matches negotiated legacy/modern reader "+extended);
    if(extended)check(raw.readInt()==20,"modern selected UDP protocol preserved");
   }

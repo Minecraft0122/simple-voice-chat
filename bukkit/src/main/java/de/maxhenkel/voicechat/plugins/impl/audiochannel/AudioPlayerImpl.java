@@ -67,13 +67,28 @@ public class AudioPlayerImpl extends Thread implements AudioPlayer {
 
     @Override
     public void run() {
+        try {
+            play();
+        } catch (Throwable t) {
+            Voicechat.LOGGER.error("Failed to play audio", t);
+        }
+
+        encoder.close();
+        audioChannel.flush();
+
+        if (onStopped != null) {
+            onStopped.run();
+        }
+    }
+
+    private void play() {
         int framePosition = 0;
 
         long startTime = System.nanoTime();
 
         short[] frame;
 
-        while ((frame = audioSupplier.get()) != null) {
+        while (!isInterrupted() && (frame = audioSupplier.get()) != null) {
             if (frame.length != FRAME_SIZE) {
                 Voicechat.LOGGER.error("Got invalid audio frame size {}!={}", frame.length, FRAME_SIZE);
                 break;
@@ -91,13 +106,6 @@ public class AudioPlayerImpl extends Thread implements AudioPlayer {
             } catch (InterruptedException e) {
                 break;
             }
-        }
-
-        encoder.close();
-        audioChannel.flush();
-
-        if (onStopped != null) {
-            onStopped.run();
         }
     }
 

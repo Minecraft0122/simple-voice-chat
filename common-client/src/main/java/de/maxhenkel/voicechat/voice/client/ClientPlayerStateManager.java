@@ -2,9 +2,6 @@ package de.maxhenkel.voicechat.voice.client;
 
 import de.maxhenkel.voicechat.Voicechat;
 import de.maxhenkel.voicechat.VoicechatClient;
-import de.maxhenkel.voicechat.api.events.ClientVoicechatConnectionEvent;
-import de.maxhenkel.voicechat.api.events.MicrophoneMuteEvent;
-import de.maxhenkel.voicechat.api.events.VoicechatDisableEvent;
 import de.maxhenkel.voicechat.gui.CreateGroupScreen;
 import de.maxhenkel.voicechat.gui.EnterPasswordScreen;
 import de.maxhenkel.voicechat.gui.group.GroupList;
@@ -17,10 +14,7 @@ import de.maxhenkel.voicechat.intercompatibility.ClientCompatibilityManager;
 import de.maxhenkel.voicechat.intercompatibility.CommonCompatibilityManager;
 import de.maxhenkel.voicechat.net.ClientServerNetManager;
 import de.maxhenkel.voicechat.net.UpdateStatePacket;
-import de.maxhenkel.voicechat.plugins.PluginManager;
-import de.maxhenkel.voicechat.plugins.impl.events.ClientVoicechatConnectionEventImpl;
-import de.maxhenkel.voicechat.plugins.impl.events.MicrophoneMuteEventImpl;
-import de.maxhenkel.voicechat.plugins.impl.events.VoicechatDisableEventImpl;
+import de.maxhenkel.voicechat.plugins.ClientPluginManager;
 import de.maxhenkel.voicechat.voice.common.ClientGroup;
 import de.maxhenkel.voicechat.voice.common.PlayerState;
 import net.minecraft.ChatFormatting;
@@ -31,6 +25,7 @@ import net.minecraft.world.entity.player.Player;
 
 import javax.annotation.Nullable;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 public class ClientPlayerStateManager {
@@ -45,7 +40,7 @@ public class ClientPlayerStateManager {
         this.disconnected = true;
         this.group = null;
 
-        states = new HashMap<>();
+        states = new ConcurrentHashMap<>();
 
         ClientServerNetManager.setClientListener(CommonCompatibilityManager.INSTANCE.getNetManager().playerStateChannel, (player, packet) -> {
             states.put(packet.getPlayerState().getUuid(), packet.getPlayerState());
@@ -57,12 +52,13 @@ public class ClientPlayerStateManager {
                     c.closeAudioChannel(packet.getPlayerState().getUuid());
                 }
             }
+            applyForcedState();
             AdjustVolumeList.update();
             JoinGroupList.update();
             GroupList.update();
         });
         ClientServerNetManager.setClientListener(CommonCompatibilityManager.INSTANCE.getNetManager().playerStatesChannel, (player, packet) -> {
-            states = packet.getPlayerStates().stream().collect(Collectors.toMap(PlayerState::getUuid, p -> p));
+            states = packet.getPlayerStates().stream().collect(Collectors.toConcurrentMap(PlayerState::getUuid, p -> p));
             Voicechat.LOGGER.debug("Received {} state(s)", states.size());
             for (PlayerState state : states.values()) {
                 VoicechatClient.USERNAME_CACHE.updateUsername(state.getUuid(), state.getName());
@@ -81,19 +77,23 @@ public class ClientPlayerStateManager {
         });
         ClientServerNetManager.setClientListener(CommonCompatibilityManager.INSTANCE.getNetManager().joinedGroupChannel, (player, packet) -> {
             Screen screen = Minecraft.getInstance().gui.screen();
-            this.group = packet.getGroup();
             if (packet.isWrongPassword()) {
                 if (screen instanceof JoinGroupScreen || screen instanceof CreateGroupScreen || screen instanceof EnterPasswordScreen) {
                     Minecraft.getInstance().gui.setScreen(null);
                 }
                 player.sendOverlayMessage(Component.translatable("message.voicechat.wrong_password").withStyle(ChatFormatting.DARK_RED));
-            } else if (group != null && screen instanceof JoinGroupScreen || screen instanceof CreateGroupScreen || screen instanceof EnterPasswordScreen) {
+                return;
+            }
+            this.group = packet.getGroup();
+            if (group != null && (screen instanceof JoinGroupScreen || screen instanceof CreateGroupScreen || screen instanceof EnterPasswordScreen || screen instanceof GroupScreen)) {
                 ClientGroup clientGroup = getGroup();
                 if (clientGroup != null) {
                     Minecraft.getInstance().gui.setScreen(new GroupScreen(clientGroup));
                 } else {
                     Voicechat.LOGGER.warn("Received join group packet without group being present");
                 }
+            } else if (group == null && screen instanceof GroupScreen) {
+                Minecraft.getInstance().gui.setScreen(new JoinGroupScreen());
             }
             GroupList.update();
         });
@@ -112,8 +112,7 @@ public class ClientPlayerStateManager {
      */
     public void onVoiceChatDisconnected() {
         disconnected = true;
-        syncOwnState();
-        PluginManager.instance().dispatchEvent(ClientVoicechatConnectionEvent.class, new ClientVoicechatConnectionEventImpl(false));
+        ClientPluginManager.instance().onVoicechatConnection(false);
     }
 
     /**
@@ -121,13 +120,21 @@ public class ClientPlayerStateManager {
      */
     public void onVoiceChatConnected(ClientVoicechatConnection client) {
         disconnected = false;
-        syncOwnState();
-        PluginManager.instance().dispatchEvent(ClientVoicechatConnectionEvent.class, new ClientVoicechatConnectionEventImpl(true));
+        ClientPluginManager.instance().onVoicechatConnection(true);
     }
 
     private void onDisconnect() {
         clearStates();
         resetOwnState();
+    }
+
+    public boolean isPlayerMuted(UUID playerId) {
+        PlayerState playerState = states.get(playerId);
+        if (playerState == null) {
+            return false;
+        }
+
+        return playerState.isMutedOrForceMuted();
     }
 
     public boolean isPlayerDisabled(UUID playerId) {
@@ -136,7 +143,37 @@ public class ClientPlayerStateManager {
             return false;
         }
 
-        return playerState.isDisabled();
+        return playerState.isDisabledOrForceDisabled();
+    }
+
+    public boolean isPlayerForceMuted(UUID playerId) {
+        PlayerState playerState = states.get(playerId);
+        if (playerState == null) {
+            return false;
+        }
+
+        return playerState.isForceMuted();
+    }
+
+    public boolean isPlayerForceDisabled(UUID playerId) {
+        PlayerState playerState = states.get(playerId);
+        if (playerState == null) {
+            return false;
+        }
+
+        return playerState.isForceDisabled();
+    }
+
+    /**
+     * Mute/disable the player when they get force muted/disabled, so revoking doesn't accidentally make the player send or hear audio.
+     */
+    private void applyForcedState() {
+        if (isForceMuted() && !VoicechatClient.CLIENT_CONFIG.muted.get()) {
+            setMuted(true);
+        }
+        if (isForceDisabled() && !VoicechatClient.CLIENT_CONFIG.disabled.get()) {
+            setDisabled(true);
+        }
     }
 
     public boolean isPlayerDisconnected(UUID playerId) {
@@ -149,15 +186,25 @@ public class ClientPlayerStateManager {
     }
 
     public void syncOwnState() {
-        ClientServerNetManager.sendToServer(new UpdateStatePacket(isDisabled()));
-        Voicechat.LOGGER.debug("Sent own state to server: disabled={}", isDisabled());
+        boolean muted = isMutedLocally();
+        boolean disabled = isDisabledLocally();
+        ClientServerNetManager.sendToServer(new UpdateStatePacket(muted, disabled));
+        Voicechat.LOGGER.debug("Sent own state to server: muted={}, disabled={}", muted, disabled);
     }
 
     public boolean isDisabled() {
+        return isForceDisabled() || isDisabledLocally();
+    }
+
+    private boolean isDisabledLocally() {
         if (!canEnable()) {
             return true;
         }
         return VoicechatClient.CLIENT_CONFIG.disabled.get();
+    }
+
+    public boolean isForceDisabled() {
+        return isPlayerForceDisabled(getOwnID());
     }
 
     public boolean canEnable() {
@@ -174,7 +221,7 @@ public class ClientPlayerStateManager {
     public void setDisabled(boolean disabled) {
         VoicechatClient.CLIENT_CONFIG.disabled.set(disabled).save();
         syncOwnState();
-        PluginManager.instance().dispatchEvent(VoicechatDisableEvent.class, new VoicechatDisableEventImpl(disabled));
+        ClientPluginManager.instance().onVoicechatDisable(disabled);
     }
 
     public boolean isDisconnected() {
@@ -182,18 +229,29 @@ public class ClientPlayerStateManager {
     }
 
     public boolean isMuted() {
+        return isForceMuted() || isMutedLocally();
+    }
+
+    private boolean isMutedLocally() {
         return VoicechatClient.CLIENT_CONFIG.muted.get();
+    }
+
+    public boolean isForceMuted() {
+        return isPlayerForceMuted(getOwnID());
     }
 
     public void setMuted(boolean muted) {
         VoicechatClient.CLIENT_CONFIG.muted.set(muted).save();
-        PluginManager.instance().dispatchEvent(MicrophoneMuteEvent.class, new MicrophoneMuteEventImpl(muted));
+        syncOwnState();
+        ClientPluginManager.instance().onMicrophoneMute(muted);
     }
 
     public void onFinishOnboarding() {
+        applyForcedState();
         syncOwnState();
     }
 
+    //TODO Check thread?
     public void onSpeakerAvailabilityChanged() {
         syncOwnState();
     }

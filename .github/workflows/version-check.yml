@@ -39,6 +39,7 @@ jobs:
           modules=$(sed 's@/\*.*\*/@@g' settings.gradle | sed -n 's/^include(\(.*\))/\1/p' | tr -d "'" | tr ',' ' ')
           tasks=()
           for module in fabric neoforge forge paper bukkit velocity bungeecord; do
+            if [ "$module" = forge ] && grep -q '^minecraft_version=26.3' gradle.properties; then continue; fi
             if printf '%s\n' "$modules" | grep -qw "$module"; then tasks+=(":$module:build"); fi
           done
           bash gradlew "${tasks[@]}" --console=plain
