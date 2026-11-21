@@ -50,7 +50,7 @@ jobs:
             (cd quilt && bash ../gradlew build --console=plain)
           fi
       - name: Check direct protocol and generated configuration
-        if: github.ref_name == 'tcp/26.3'
+        if: github.ref_name == 'tcp/26.3' || startsWith(github.ref_name, 'tcp/26.3-')
         run: |
           python3 tests/direct/run.py
           python3 tests/config/run.py
