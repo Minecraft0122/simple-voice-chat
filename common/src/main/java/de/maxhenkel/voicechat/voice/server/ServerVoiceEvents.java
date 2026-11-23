@@ -3,6 +3,11 @@ package de.maxhenkel.voicechat.voice.server;
 import de.maxhenkel.voicechat.BuildConstants;
 import de.maxhenkel.voicechat.voice.transport.VoiceProtocol;
 import de.maxhenkel.voicechat.voice.transport.TransportMode;
+import de.maxhenkel.voicechat.voice.transport.ProxyMessages;
+import de.maxhenkel.voicechat.voice.transport.ProxySettings;
+import de.maxhenkel.voicechat.voice.transport.ProxyConfigSync;
+import de.maxhenkel.voicechat.net.ProxyControlPacket;
+import de.maxhenkel.voicechat.net.RequestSecretPacket;
 import de.maxhenkel.voicechat.Voicechat;
 import de.maxhenkel.voicechat.intercompatibility.CommonCompatibilityManager;
 import de.maxhenkel.voicechat.intercompatibility.CrossSideManager;
@@ -33,6 +38,8 @@ public class ServerVoiceEvents {
     private final java.util.Set<UUID> versionWarnings = ConcurrentHashMap.newKeySet();
     private final PacketRateLimiter rateLimiter;
     private Server server;
+    private final ProxyConfigSync proxyConfigSync = new ProxyConfigSync();
+    private final Map<UUID, RequestSecretPacket> pendingProxyRequests = new ConcurrentHashMap<>();
 
     public ServerVoiceEvents() {
         clientCompatibilities = new ConcurrentHashMap<>();
@@ -53,24 +60,7 @@ public class ServerVoiceEvents {
         });
         CommonCompatibilityManager.INSTANCE.getNetManager().versionChannel.setServerListener(this::onVersionPacket);
         CommonCompatibilityManager.INSTANCE.getNetManager().requestSecretChannel.setServerListener((player, packet) -> {
-            Voicechat.LOGGER.info("Received secret request of {} ({})", player.getName().getString(), packet.getCompatibilityVersion());
-            if (packet.hasTransportExtension()) extendedClients.add(player.getUUID());
-            if (!versionReported.contains(player.getUUID()) && versionWarnings.add(player.getUUID())) {
-                String message = VoiceVersion.unverified(packet.getCompatibilityVersion(), CommonCompatibilityManager.INSTANCE.getModVersion());
-                Voicechat.LOGGER.warn("Player {} ({}): {}", player.getName().getString(), player.getUUID(), message);
-                player.sendSystemMessage(Component.literal(message));
-            }
-            VoiceProtocol selected = VoiceProtocol.fromVersion(packet.getCompatibilityVersion()) == null ? null
-                    : TransportMode.parse(Voicechat.SERVER_CONFIG.transportMode.get())
-                    .select(Voicechat.SERVER_CONFIG.transportPreference.get(), packet.getTransportCapabilities());
-            if (selected == null) {
-                Voicechat.LOGGER.warn("Connected client {} has incompatible voice chat version (server={}, client={})", player.getName().getString(), Voicechat.COMPATIBILITY_VERSION, packet.getCompatibilityVersion());
-                player.sendSystemMessage(getIncompatibleMessage(packet.getCompatibilityVersion()));
-            } else {
-                Integer previous = clientCompatibilities.putIfAbsent(player.getUUID(), selected.version());
-                if (previous != null && previous != selected.version()) return;
-                initializePlayerConnection(player);
-            }
+            onRequestSecretPacket(player, packet);
         });
     }
 
@@ -83,6 +73,61 @@ public class ServerVoiceEvents {
                     Component.literal(BuildConstants.MOD_COMPATIBLE_VERSION).withStyle(ChatFormatting.BOLD),
                     Component.literal(CommonCompatibilityManager.INSTANCE.getModName()).withStyle(ChatFormatting.BOLD));
         }
+    }
+
+    public void onRequestSecretPacket(ServerPlayer player, RequestSecretPacket packet) {
+        if (Voicechat.SERVER_CONFIG.isProxyMode()) {
+            pendingProxyRequests.putIfAbsent(player.getUUID(), packet);
+            requestProxySettings(player);
+            return;
+        }
+        processSecretRequest(player, packet);
+    }
+
+    private void processSecretRequest(ServerPlayer player, RequestSecretPacket packet) {
+        Voicechat.LOGGER.info("Received secret request of {} ({})", player.getName().getString(), packet.getCompatibilityVersion());
+        if (packet.hasTransportExtension()) extendedClients.add(player.getUUID());
+        if (packet.hasTransportExtension() && !versionReported.contains(player.getUUID()) && versionWarnings.add(player.getUUID())) {
+            String message = VoiceVersion.unverified(packet.getCompatibilityVersion(), CommonCompatibilityManager.INSTANCE.getModVersion());
+            Voicechat.LOGGER.warn("Player {} ({}): {}", player.getName().getString(), player.getUUID(), message);
+            player.sendSystemMessage(Component.literal(message));
+        }
+        VoiceProtocol selected = VoiceProtocol.fromVersion(packet.getCompatibilityVersion()) == null ? null
+                : TransportMode.parse(Voicechat.SERVER_CONFIG.getTransportMode())
+                .select(Voicechat.SERVER_CONFIG.getTransportPreference(), packet.getTransportCapabilities());
+        if (selected == null) {
+            Voicechat.LOGGER.warn("Connected client {} has incompatible voice chat version (server={}, client={})", player.getName().getString(), Voicechat.COMPATIBILITY_VERSION, packet.getCompatibilityVersion());
+            player.sendSystemMessage(getIncompatibleMessage(packet.getCompatibilityVersion()));
+        } else {
+            Integer previous = clientCompatibilities.putIfAbsent(player.getUUID(), selected.version());
+            if (previous != null && previous != selected.version()) return;
+            initializePlayerConnection(player);
+        }
+    }
+
+    private void requestProxySettings(ServerPlayer player) {
+        UUID nonce = proxyConfigSync.begin(player.getUUID(), System.currentTimeMillis());
+        if (nonce == null) return;
+        NetManager.sendToClient(player, new ProxyControlPacket(ProxyMessages.encode(ProxyMessages.CONFIG_REQUEST, 0L, nonce, new byte[0])));
+        java.util.concurrent.CompletableFuture.delayedExecutor(ProxyConfigSync.TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS).execute(() -> {
+            if (server == null) return;
+            CommonCompatibilityManager.INSTANCE.executeForPlayer(server.getServer(), player, () -> {
+                if (!proxyConfigSync.expire(player.getUUID(), nonce)) return;
+                if (pendingProxyRequests.remove(player.getUUID()) == null) return;
+                Voicechat.LOGGER.warn("Voice proxy configuration sync timed out for {}. Install matching proxy/backend builds.", player.getUUID());
+                player.sendSystemMessage(Component.literal("语音代理配置同步超时，请管理员确认代理和后端均已更新。"));
+            }, () -> { if (proxyConfigSync.expire(player.getUUID(), nonce)) pendingProxyRequests.remove(player.getUUID()); });
+        });
+    }
+
+    public void onProxySettings(ServerPlayer player, ProxyMessages.Message message) {
+        if (!Voicechat.SERVER_CONFIG.isProxyMode() || message.generation() != 0L) return;
+        ProxySettings settings = ProxySettings.decode(message.payload());
+        if (!proxyConfigSync.accept(player.getUUID(), message.session(), System.currentTimeMillis())) return;
+        Voicechat.SERVER_CONFIG.applyProxySettings(settings);
+        Voicechat.LOGGER.info("Synchronized voice proxy configuration: mode={}, preference={}, port={}", settings.mode(), settings.preference(), settings.port());
+        RequestSecretPacket request = pendingProxyRequests.remove(player.getUUID());
+        if (request != null) processSecretRequest(player, request);
     }
 
     public void onVersionPacket(ServerPlayer player, VersionPacket packet) {
@@ -100,7 +145,7 @@ public class ServerVoiceEvents {
     }
 
     private boolean supportsVersion(int version) {
-        return TransportMode.parse(Voicechat.SERVER_CONFIG.transportMode.get()).supports(VoiceProtocol.fromVersion(version));
+        return TransportMode.parse(Voicechat.SERVER_CONFIG.getTransportMode()).supports(VoiceProtocol.fromVersion(version));
     }
 
     public VoiceProtocol getProtocol(UUID playerUuid) {
@@ -162,6 +207,7 @@ public class ServerVoiceEvents {
     }
 
     public void playerLoggedIn(ServerPlayer serverPlayer) {
+        if (server != null && Voicechat.SERVER_CONFIG.isProxyMode()) requestProxySettings(serverPlayer);
         if (server != null) {
             server.onPlayerLoggedIn(serverPlayer);
         }
@@ -192,6 +238,8 @@ public class ServerVoiceEvents {
     }
 
     public void playerLoggedOut(ServerPlayer player) {
+        proxyConfigSync.remove(player.getUUID());
+        pendingProxyRequests.remove(player.getUUID());
         clientCompatibilities.remove(player.getUUID());
         extendedClients.remove(player.getUUID());
         versionReported.remove(player.getUUID());

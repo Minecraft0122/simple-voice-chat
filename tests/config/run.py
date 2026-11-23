@@ -35,7 +35,7 @@ for module in ('common','bukkit'):
  production=root/f'{module}/src/main/java/de/maxhenkel/voicechat/config/ServerConfig.java'
  sources.append(str(production))
  sources.append(str(root/'common-proxy/src/main/java/de/maxhenkel/voicechat/config/ProxyConfig.java'))
- for name in ('ProxyEnvironment','TransportMode','VoiceProtocol','VoiceEndpoint'):
+ for name in ('ProxyEnvironment','TransportMode','VoiceProtocol','VoiceEndpoint','ProxySettings'):
   sources.append(str(root/f'common/src/main/java/de/maxhenkel/voicechat/voice/transport/{name}.java'))
  factory='b -> new ServerConfig(b, Voicechat.Loader.FABRIC)' if module=='common' else 'ServerConfig::new'
  test=(root/'tests/config/ConfigTest.java').read_text(encoding='utf-8').replace('CONFIG_FACTORY',factory)

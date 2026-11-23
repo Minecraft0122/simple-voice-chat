@@ -54,6 +54,9 @@ jobs:
         run: |
           python3 tests/direct/run.py
           python3 tests/config/run.py
+          python3 tests/auto-proxy/run.py
+      - name: Verify newest published original client protocol
+        run: python3 tests/upstream/check_published_client.py
       - uses: actions/upload-artifact@v4
         with:
           name: voicechat-version-check-${{ github.ref_name == 'tcp/26.1' && '26.1.2' || github.ref_name == 'tcp/26.3' && '26.3' || github.sha }}
@@ -67,6 +70,7 @@ jobs:
             bukkit/build/libs/*.jar
             velocity/build/libs/*.jar
             bungeecord/build/libs/*.jar
+            build/upstream-client-check/compatibility-report.txt
             !**/*-sources.jar
             !**/*-javadoc.jar
             !**/*-dev.jar

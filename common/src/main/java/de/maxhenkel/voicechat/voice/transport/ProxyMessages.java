@@ -9,6 +9,8 @@ public final class ProxyMessages {
     public static final int MICROPHONE = 1;
     public static final int SOUND = 2;
     public static final int PONG = 3;
+    public static final int CONFIG_REQUEST = 4;
+    public static final int CONFIG_RESPONSE = 5;
     private ProxyMessages() {}
 
     public static byte[] encode(int type, long generation, UUID session, byte[] payload) {

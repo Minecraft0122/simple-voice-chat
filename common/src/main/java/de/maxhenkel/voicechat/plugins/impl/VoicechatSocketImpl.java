@@ -36,7 +36,7 @@ public class VoicechatSocketImpl implements VoicechatSocket {
             requestedAddress = "";
         }
         long timeout = Math.max(30_000L, Voicechat.SERVER_CONFIG.keepAlive.get() * 10L);
-        DualVoiceServer transport = new DualVoiceServer(TransportMode.parse(Voicechat.SERVER_CONFIG.transportMode.get()), (int) Math.min(Integer.MAX_VALUE, timeout));
+        DualVoiceServer transport = new DualVoiceServer(TransportMode.parse(Voicechat.SERVER_CONFIG.getTransportMode()), (int) Math.min(Integer.MAX_VALUE, timeout));
         try {
             transport.open(port, requestedAddress);
             server = transport;

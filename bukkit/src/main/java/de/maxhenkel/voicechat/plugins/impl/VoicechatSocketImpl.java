@@ -35,7 +35,7 @@ public class VoicechatSocketImpl implements VoicechatSocket {
             Voicechat.LOGGER.error("Failed to parse bind IP address '{}'", bindAddress, e);
         }
 
-        DualVoiceServer transport = new DualVoiceServer(TransportMode.parse(Voicechat.SERVER_CONFIG.transportMode.get()), Math.max(30_000, Voicechat.SERVER_CONFIG.keepAlive.get() * 10));
+        DualVoiceServer transport = new DualVoiceServer(TransportMode.parse(Voicechat.SERVER_CONFIG.getTransportMode()), Math.max(30_000, Voicechat.SERVER_CONFIG.keepAlive.get() * 10));
         try {
             transport.open(port, requestedAddress);
             socket = transport;

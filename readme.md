@@ -3,7 +3,7 @@
 这是 [henkelmax/simple-voice-chat](https://github.com/henkelmax/simple-voice-chat) 的 TCP 分支。
 本分支客户端使用独立 TCP 连接；当前 tcp/26.3 服务端新增可选 TCP/UDP 双协议接入，兼容协议 20 的原版 UDP 客户端，保留上游 Opus 编码、AES 加密、距离语音、群聊及插件 API。
 
-设置 transport_mode=dual 后，原版 UDP 与本分支 TCP 玩家可以互相语音。现有配置默认保持 tcp。开启方法、中央代理配置和兼容边界见 [双协议部署说明](docs/dual-transport.md)。
+设置 transport_mode=dual 后，原版 UDP 与本分支 TCP 玩家可以互相语音。新配置默认 dual；旧 tcp 配置在 allow_original_clients=true（默认）时自动按 dual 运行，不改写原值。开启方法、中央代理配置和兼容边界见 [双协议部署说明](docs/dual-transport.md)。
 
 ## 版本与安装
 
@@ -24,17 +24,27 @@
 5. 若使用端口映射或独立语音域名，将 `voice_host` 设为玩家可连接的 `域名:外部语音端口`。
 
 局域网开放世界也使用配置的固定语音端口（默认 24454），游戏聊天栏会显示该端口。
-Minecraft 代理可以使用 26.3 分支内置的集中 TCP 语音代理。每个后端服都安装同一分支的服务端插件，并在其配置中设置 `proxy_mode=true`；后端不再监听玩家语音 TCP 连接，只通过 `voicechat:proxy_routing` 插件消息发送玩家状态、距离和目标 UUID。Velocity/BungeeCord 代理默认监听公共 `24454/TCP`（双协议模式另监听同端口 UDP），直接完成客户端认证、解密、路由和重新加密，普通距离/群组语音不经过子服链路。若子服扩展注册了麦克风、声音、距离事件或音频监听器，自动启用该子服的音频处理回传，以保证禁言、过滤、自定义路由与录音有效；插件主动播放的音频也通过代理发送。
+Minecraft 代理可以使用 26.3 分支内置的集中 TCP 语音代理。每个后端服都安装同一分支的服务端插件，并在其配置中保留默认 `proxy_auto_detect=true`，自动识别游戏代理转发；后端不再监听玩家语音 TCP 连接，只通过 `voicechat:proxy_routing` 插件消息发送玩家状态、距离和目标 UUID。Velocity/BungeeCord 代理默认监听公共 `24454/TCP`（双协议模式另监听同端口 UDP），直接完成客户端认证、解密、路由和重新加密，普通距离/群组语音不经过子服链路。若子服扩展注册了麦克风、声音、距离事件或音频监听器，自动启用该子服的音频处理回传，以保证禁言、过滤、自定义路由与录音有效；插件主动播放的音频也通过代理发送。
 代理配置文件为 `voicechat-proxy.properties`，至少确认 `port=24454`，并将玩家可访问的 `voice_host` 设置为代理地址。TCP/dual 模式下，代理的游戏端口和语音端口必须不同。
 
 本分支 TCP 玩家进入没有语音插件的子服时，会收到“语音聊天在此子服不可用”的提示，客户端停止发送音频并关闭旧语音连接。子服 UUID 映射缺失或矛盾时，停止该玩家语音，客户端提示服务器内部错误，代理控制台记录玩家和子服信息。默认 `allow_spectator_voice=false`，旁观者无法发送或接收语音；离开旁观模式会恢复。语音暂时受限时可以保留认证连接和控制心跳，但不会发送麦克风数据。
 
-当前集中模式的距离和群组目标仍限定在同一子服，没有全网跨子服群组目录。路由变化时发送完整快照，不变时每秒只发送短心跳。使用双协议构建时，子服和代理都配置 transport_mode=dual；TCP 客户端使用 1021，原版 UDP 客户端使用 20。旧服务端构建仍仅接受 1021。代理 JAR 从 `tcp/26.3` 分发包获取，客户端和后端则安装各自 Minecraft 版本的构建。
+当前集中模式的距离和群组目标仍限定在同一子服，没有全网跨子服群组目录。路由变化时发送完整快照，不变时每秒只发送短心跳。使用双协议构建时，代理默认 dual，子服在认证前自动同步代理的有效网络配置；TCP 客户端使用 1021，原版 UDP 客户端使用 20。旧服务端构建仍仅接受 1021。代理 JAR 从 `tcp/26.3` 分发包获取，客户端和后端则安装各自 Minecraft 版本的构建。
 Folia 26.1.2 后端必须启用 `proxy_mode=true`；玩家位置和权限通过每个玩家的区域调度器读取。Folia 不执行需要服务器音频回传的插件处理钩子，若检测到此类插件会在控制台报告并停用该后端的语音。
-本分支 TCP 协议号保持 `1021`；双协议服务端额外接受上游 UDP 协议 `20`。默认 tcp 模式仍拒绝 UDP 客户端。
+本分支 TCP 协议号保持 `1021`；双协议服务端额外接受上游 UDP 协议 `20`。只有显式设置 `allow_original_clients=false` 且 `transport_mode=tcp` 时才拒绝原版 UDP 客户端。
 
 当前 26.3 构建默认根据 Paper/Spigot 游戏转发设置或 FabricProxy-Lite 自动启用代理模式，无需手动开启上述 `proxy_mode`。未覆盖的转发集成仍可手动设置 `proxy_mode=true`。
 配置项按网络、代理、语音规则、音频、玩家接入和高级设置排列，并附有注释。如需在游戏代理之后保留后端直连语音，请同时关闭 `proxy_auto_detect` 和 `proxy_mode`。普通 TUN 网络代理不会触发代理模式。
+
+## 原版客户端与自动代理配置（tcp.3.3）
+
+- 原版客户端继续使用 UDP，无需安装本分支客户端。服务端支持已发布的协议 20 客户端；CI 会下载 Modrinth 作者项目中对应 Minecraft 版本最新发布的 Fabric 客户端，校验 SHA-512 并检查其协议号。协议变更会使检查失败，不能把未来版本自动视为兼容。
+- 新配置默认 `transport_mode=dual`、`allow_original_clients=true`。旧配置即使保留 `transport_mode=tcp`，默认也会按 dual 运行；仅 TCP 部署需显式设置 `allow_original_clients=false`。因此升级时必须确认语音端口 UDP 也已放行。
+- `proxy_auto_detect=true` 默认识别 Paper/Folia 的 Velocity 转发、Spigot/BungeeCord 转发和 FabricProxy-Lite；直连环境不进入代理模式。手动 `proxy_mode=true` 用于未覆盖的转发集成；TUN/HTTP/SOCKS 不触发此模式。
+- 代理和后端均安装本次构建。后端在玩家加入及每次语音认证前，通过私有插件消息请求配置；代理返回有效 `transport_mode`、`transport_preference`、公网语音端口和 `voice_host`。后端使用该运行时快照，最终客户端端点仍由代理改写。
+- 同步带一次性请求标识，客户端来源的私有消息被代理拦截。未收到有效回复时不发放语音密钥，5 秒后向请求语音的玩家及控制台提示同步超时；没有语音客户端的玩家不弹出超时提示。旧代理插件必须和后端一起升级。
+- 同步只统一网络入口，不覆盖后端配置文件、距离、权限、群组、限流、禁言和审核缓存。修改代理网络设置后完整重启代理；玩家重新连接时自动获取新快照。无玩家在线时插件消息无法传输，首次玩家加入时同步。
+- 当前不承诺尚未发布的 2.7 / 协议 21 开发代码可用；协议号 20 与本分支 TCP 1021 独立协商。CI 通过也不等同于真实 Velocity + Folia 联机验证。
 
 ## 构建与验证
 
@@ -88,11 +98,11 @@ Please read the [wiki](https://modrepo.de/minecraft/voicechat/wiki/setup) for mo
 
 ## TCP/UDP compatibility in this fork
 
-For the 26.3 fork builds, the server can accept the original UDP protocol and the fork's TCP protocol. Set `transport_mode` in `voicechat-server.properties` to `udp`, `tcp`, or `dual`. The default is `tcp`; use `dual` when both fork clients and original UDP clients need to connect.
+For the 26.3 fork builds, the server can accept the original UDP protocol and the fork's TCP protocol. Set `transport_mode` in `voicechat-server.properties` to `udp`, `tcp`, or `dual`. The default is `dual`. With `allow_original_clients=true` (default), an older `tcp` setting also runs as `dual` without rewriting the file. Set that option to `false` to enforce TCP-only access.
 
 When using `dual`, forward both TCP and UDP on the configured voice port. TCP and dual mode require a voice port different from the Minecraft game TCP port. `transport_preference` controls which transport a dual-capable fork client tries first; it does not enable a transport that `transport_mode` has disabled.
 
-TCP clients require a matching client build from this fork. UDP mode remains compatible with the original UDP protocol. For Velocity or BungeeCord, install the matching fork build on the proxy and every backend, and configure the same `transport_mode` on each server.
+TCP clients require a matching client build from this fork. UDP mode remains compatible with the original UDP protocol. For Velocity or BungeeCord, install the matching fork build on the proxy and every backend, The backend automatically detects supported game forwarding and synchronizes effective network settings from the proxy before voice authentication.
 
 <p align="center">
     <a href="https://discord.gg/4dH2zwTmyX">
@@ -189,9 +199,9 @@ By clicking the microphone button, you can test your microphone activation.
 
 ## Important Notes
 
-This fork uses port `24454` **TCP** by default. Both server and clients must use this fork.
+This fork uses port `24454` **TCP and UDP** by default. Original protocol-20 clients can connect over UDP; TCP clients use this fork.
 Without opening this port, the voice chat will not work.
 This port can be changed in the server config.
-See the TCP installation instructions above; upstream UDP setup instructions do not apply to this fork.
+Forward both enabled transports. In central proxy mode only the proxy owns the public voice listener; backends synchronize network settings automatically.
 
 The voice chat is encrypted, but we don't guarantee the security of it. Use at your own risk!

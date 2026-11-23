@@ -17,6 +17,7 @@ public class VoiceProxy {
     public static boolean isPrivateChannel(String s) { return Set.of(PROXY_ROUTING_CHANNEL, PROXY_CONTROL_CHANNEL, PROXY_AUDIO_CHANNEL, AVAILABILITY_CHANNEL).contains(s); }
     public record Value<T>(T value) { public T get() { return value; } }
     public static class Config {
+        public String getTransportMode() { return transportMode.get(); }
         public Value<String> bindAddress = new Value<>("127.0.0.1"), voiceHost = new Value<>("");
         public Value<String> transportMode = new Value<>("tcp");
         public Value<String> transportPreference = new Value<>("tcp,udp");

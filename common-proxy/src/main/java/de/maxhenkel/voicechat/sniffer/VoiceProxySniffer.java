@@ -5,6 +5,8 @@ import de.maxhenkel.voicechat.voice.transport.VoiceAvailability;
 import de.maxhenkel.voicechat.voice.transport.VoiceProtocol;
 import de.maxhenkel.voicechat.voice.transport.TransportMode;
 import de.maxhenkel.voicechat.voice.transport.VoiceVersion;
+import de.maxhenkel.voicechat.voice.transport.ProxyMessages;
+import de.maxhenkel.voicechat.voice.transport.ProxySettings;
 import de.maxhenkel.voicechat.util.ByteBufferWrapper;
 import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
@@ -65,7 +67,7 @@ public class VoiceProxySniffer {
                 capabilities = message.get() & 255;
                 readUtf(message, 32);
             }
-            VoiceProtocol selected = TransportMode.parse(voiceProxy.getConfig().transportMode.get())
+            VoiceProtocol selected = TransportMode.parse(voiceProxy.getConfig().getTransportMode())
                     .select(voiceProxy.getConfig().transportPreference.get(), capabilities);
             if (selected == null) throw new IncompatibleVoiceChatException("No mutually supported voice transport");
             Integer previous = compatibilityVersionMap.putIfAbsent(player, selected.version());
@@ -77,6 +79,17 @@ public class VoiceProxySniffer {
         }
         if (!fromServer) return null;
         try {
+            if (channel.equals(VoiceProxy.PROXY_CONTROL_CHANNEL)) {
+                byte[] bytes = new byte[message.remaining()]; message.get(bytes);
+                ProxyMessages.Message control = ProxyMessages.decode(bytes);
+                if (control.type() == ProxyMessages.CONFIG_REQUEST && control.payload().length == 0) {
+                    ProxySettings settings = new ProxySettings(TransportMode.parse(voiceProxy.getConfig().getTransportMode()),
+                            voiceProxy.getConfig().transportPreference.get(), voiceProxy.getPort(), voiceProxy.getConfig().voiceHost.get());
+                    voiceProxy.sendToBackend(player, VoiceProxy.PROXY_CONTROL_CHANNEL, ProxyMessages.encode(ProxyMessages.CONFIG_RESPONSE,
+                            control.generation(), control.session(), settings.encode()));
+                }
+                return ByteBuffer.allocate(0);
+            }
             if (channel.equals(VoiceProxy.SECRET_CHANNEL)) return handleSecret(message, player);
             if (channel.equals(VoiceProxy.PROXY_ROUTING_CHANNEL)) {
                 handleRouting(message.slice(), player);
@@ -97,7 +110,7 @@ public class VoiceProxySniffer {
 
     private ByteBuffer handleSecret(ByteBuffer message, UUID player) throws IncompatibleVoiceChatException {
         Integer version = compatibilityVersionMap.get(player);
-        if (version == null || !TransportMode.parse(voiceProxy.getConfig().transportMode.get()).supports(VoiceProtocol.fromVersion(version))) {
+        if (version == null || !TransportMode.parse(voiceProxy.getConfig().getTransportMode()).supports(VoiceProtocol.fromVersion(version))) {
             internalError(player, "Missing or incompatible client protocol version");
             throw new IncompatibleVoiceChatException("Supported voice client and enabled transport required");
         }

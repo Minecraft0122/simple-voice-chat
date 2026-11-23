@@ -80,7 +80,7 @@ public class Server extends Thread {
         } else {
             port = configPort;
         }
-        if (!Voicechat.SERVER_CONFIG.isProxyMode() && TransportMode.parse(Voicechat.SERVER_CONFIG.transportMode.get()).tcp() && port != 0 && port == Bukkit.getPort()) {
+        if (!Voicechat.SERVER_CONFIG.isProxyMode() && TransportMode.parse(Voicechat.SERVER_CONFIG.getTransportMode()).tcp() && port != 0 && port == Bukkit.getPort()) {
             throw new IllegalArgumentException("TCP voice chat needs a port different from the Minecraft server port. Change port in voicechat-server.properties.");
         }
         this.server = Bukkit.getServer();
@@ -497,9 +497,14 @@ public class Server extends Thread {
 
     /** Called only on the server thread, over the proxy-owned control channel. */
     public void handleProxyControl(Player player, byte[] bytes) {
-        if (!Voicechat.SERVER_CONFIG.isProxyMode() || !Voicechat.SERVER.isCompatible(player)) return;
+        if (!Voicechat.SERVER_CONFIG.isProxyMode()) return;
         try {
             ProxyMessages.Message message = ProxyMessages.decode(bytes);
+            if (message.type() == ProxyMessages.CONFIG_RESPONSE) {
+                Voicechat.SERVER.onProxySettings(player, message);
+                return;
+            }
+            if (!Voicechat.SERVER.isCompatible(player)) return;
             if (message.generation() != proxyRoutingGeneration) return;
             UUID uuid = player.getUniqueId();
             ClientConnection connection = connections.get(uuid);

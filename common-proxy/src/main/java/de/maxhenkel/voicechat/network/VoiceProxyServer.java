@@ -33,13 +33,13 @@ public class VoiceProxyServer extends Thread {
 
     @Override public void run() {
         try {
-            transport = new DualVoiceServer(TransportMode.parse(voiceProxy.getConfig().transportMode.get()), 30_000);
+            transport = new DualVoiceServer(TransportMode.parse(voiceProxy.getConfig().getTransportMode()), 30_000);
             String bind = voiceProxy.getConfig().bindAddress.get();
             if (bind == null || bind.isBlank()) bind = voiceProxy.getDefaultBindSocket().getAddress().getHostAddress();
             if (bind.equals("*")) bind = "";
             transport.open(voiceProxy.getPort(), bind);
             if (isInterrupted()) return;
-            voiceProxy.getLogger().info("Voice proxy started at {}:{} ({})", bind, transport.getLocalPort(), voiceProxy.getConfig().transportMode.get());
+            voiceProxy.getLogger().info("Voice proxy started at {}:{} ({})", bind, transport.getLocalPort(), voiceProxy.getConfig().getTransportMode());
             keepAliveThread = Thread.ofVirtual().name("voicechat-proxy-keepalive").start(this::keepAliveLoop);
             while (!isInterrupted()) {
                 TcpServer.ReceivedPacket packet = transport.read();

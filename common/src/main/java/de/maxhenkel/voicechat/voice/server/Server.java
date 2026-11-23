@@ -92,7 +92,7 @@ public class Server extends Thread {
             } else {
                 port = configPort;
             }
-            if (!Voicechat.SERVER_CONFIG.isProxyMode() && TransportMode.parse(Voicechat.SERVER_CONFIG.transportMode.get()).tcp() && port != 0 && port == server.getPort()) {
+            if (!Voicechat.SERVER_CONFIG.isProxyMode() && TransportMode.parse(Voicechat.SERVER_CONFIG.getTransportMode()).tcp() && port != 0 && port == server.getPort()) {
                 throw new IllegalArgumentException("TCP voice chat needs a port different from the Minecraft server port. Change port in voicechat-server.properties.");
             }
         } else {
@@ -254,7 +254,7 @@ public class Server extends Thread {
         if (!running) {
             throw new IllegalStateException("Voice chat server is closed");
         }
-        if (!Voicechat.SERVER_CONFIG.isProxyMode() && TransportMode.parse(Voicechat.SERVER_CONFIG.transportMode.get()).tcp() && port != 0 && port == server.getPort()) {
+        if (!Voicechat.SERVER_CONFIG.isProxyMode() && TransportMode.parse(Voicechat.SERVER_CONFIG.getTransportMode()).tcp() && port != 0 && port == server.getPort()) {
             throw new IllegalArgumentException("TCP voice chat cannot share the Minecraft server port");
         }
         VoicechatSocket newSocket = PluginManager.instance().getSocketImplementation(server);
@@ -786,9 +786,14 @@ public class Server extends Thread {
 
     /** Called only on the server thread, over the proxy-owned control channel. */
     public void handleProxyControl(ServerPlayer player, byte[] bytes) {
-        if (!Voicechat.SERVER_CONFIG.isProxyMode() || !Voicechat.SERVER.isCompatible(player)) return;
+        if (!Voicechat.SERVER_CONFIG.isProxyMode()) return;
         try {
             ProxyMessages.Message message = ProxyMessages.decode(bytes);
+            if (message.type() == ProxyMessages.CONFIG_RESPONSE) {
+                Voicechat.SERVER.onProxySettings(player, message);
+                return;
+            }
+            if (!Voicechat.SERVER.isCompatible(player)) return;
             if (message.generation() != proxyRoutingGeneration) return;
             UUID uuid = player.getUUID();
             ClientConnection connection = connections.get(uuid);

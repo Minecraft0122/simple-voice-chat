@@ -4,15 +4,15 @@
 
 ## 开启方式
 
-现有安装默认保持 TCP。在 voicechat-server.properties 中配置并重启：
+新安装默认双协议。旧 transport_mode=tcp 在 allow_original_clients=true（默认）时自动按 dual 运行；只允许 TCP 时显式将该选项设为 false。配置后完整重启：
 
     transport_mode=dual
     port=24454
     voice_host=voice.example.com:24454
 
-- tcp：仅接受本分支客户端协议 1021，默认值。
+- tcp：本分支客户端协议 1021；仅当 allow_original_clients=false 才保持仅 TCP。
 - udp：仅接受上游客户端协议 20。
-- dual：同时监听同一地址、同一端口数字的 TCP 和 UDP。
+- dual：默认值，同时监听同一地址、同一端口数字的 TCP 和 UDP。
 
 dual 模式需要同时放行 24454/TCP 和 24454/UDP，容器映射也必须分别配置。
 voice_host 同时用于两种协议；此版不支持为 TCP、UDP 公告不同的公网端口。
@@ -34,7 +34,7 @@ TCP/dual 的语音端口不能与 Minecraft TCP 端口相同。port=0 仍禁止�
 | 当前 TCP 客户端 | 兼容协议号为 1021，无须升级客户端协议 |
 
 不接受其他兼容协议号，也不保证所有历史 2.x 客户端可用。
-上游格式对照基线为本地 upstream/26.3 的 11c17e16（2.6.24、协议 20）；这不是对未来上游版本的兼容承诺。
+原有格式基线为协议 20。新增 CI 检查会下载作者 Modrinth 项目中对应 Minecraft 版本最新发布的 Fabric 客户端，校验 SHA-512 并检查实际协议常量；最新版一旦改变协议，检查会失败。上游 2.7 开发分支的协议 21 尚未适配，不会冒充协议 20 接入。
 
 ## 中央代理
 
@@ -44,7 +44,7 @@ TCP/dual 的语音端口不能与 Minecraft TCP 端口相同。port=0 仍禁止�
     proxy_auto_detect=true
     # 未覆盖的转发集成可设为 true，强制开启代理模式
     proxy_mode=false
-    # 与代理配置相同：兼容原版 UDP 和本分支 TCP 客户端
+    # 直连时使用；代理模式自动同步代理的有效网络配置
     transport_mode=dual
 
 代理 voicechat-proxy.properties：
@@ -131,3 +131,11 @@ Linux/macOS 对应使用 scripts/test-tcp.sh、test-proxy.sh、test-runtime.sh�
 
 上线前应使用两个匹配游戏版本的真实客户端（原版 UDP + 本分支 TCP），验证双方听音、距离/群组/耳语、
 禁用/权限/旁观者、麦克风设备重载、UDP NAT 超时重连和代理切服。
+
+## 自动配置同步
+
+代理和后端均需升级到 tcp.3.3 或更新的匹配构建。保留 proxy_auto_detect=true 即可根据游戏转发配置自动选择代理模式，无需手动修改 proxy_mode。未覆盖的自定义转发仍可手动强制开启。
+
+玩家加入或申请语音密钥时，后端主动发送带一次性标识的配置请求。代理返回有效传输模式、传输优先顺序、公网语音端口、voice_host。后端仅在运行时应用网络快照；公网端点由代理写入返回客户端的 secret。距离、权限、群组、审核及限流规则不参加覆盖。新配置默认 dual；旧 tcp 配置也因 allow_original_clients=true 默认启用 UDP。代理是网络设置来源，后端同名设置不需要手动对齐。
+
+5 秒内未得到匹配回复就停止该次语音认证，并提示正在请求语音的玩家和管理员检查代理插件版本。没有语音客户端的玩家不显示同步超时消息。过期、重复、伪造客户端来源的配置消息不能完成认证。更改代理网络配置后完整重启代理并让玩家重连，后端配置文件保持原样。该机制依赖受保护的后端游戏连接；后端游戏端口不应允许绕过代理直连。没有在线玩家时不建立独立配置连接，在首次玩家加入时同步。

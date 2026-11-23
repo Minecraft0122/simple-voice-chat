@@ -10,6 +10,7 @@ javac --release 25 -encoding UTF-8 -d "$out" \
     "$proxy/sniffer/VoiceProxySniffer.java" "$proxy/sniffer/SniffedSecretPacket.java" "$proxy/sniffer/IncompatibleVoiceChatException.java" \
     "$proxy/util/ByteBufferWrapper.java" "$proxy/util/VarIntUtils.java" "$proxy/logging/VoiceChatLogger.java" "$proxy/logging/LogLevel.java" \
     "$transport"/*.java \
-    "$root/tests/proxy/stubs/de/maxhenkel/voicechat/VoiceProxy.java" "$root/tests/proxy/ProxyRuntimeTest.java" "$root/tests/proxy/MixedProxyTest.java"
+    "$root/tests/proxy/stubs/de/maxhenkel/voicechat/VoiceProxy.java" "$root/tests/proxy/ProxyRuntimeTest.java" "$root/tests/proxy/MixedProxyTest.java" "$root/tests/proxy/ProxyConfigSyncTest.java"
 java -ea -cp "$out" de.maxhenkel.voicechat.network.ProxyRuntimeTest
 java -ea -cp "$out" de.maxhenkel.voicechat.network.MixedProxyTest
+java -ea -cp "$out" de.maxhenkel.voicechat.network.ProxyConfigSyncTest

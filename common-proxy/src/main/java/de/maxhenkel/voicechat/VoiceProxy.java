@@ -93,7 +93,7 @@ public abstract class VoiceProxy {
         if (port == -1) {
             port = 24454;
         }
-        if (de.maxhenkel.voicechat.voice.transport.TransportMode.parse(getConfig().transportMode.get()).tcp() && port != 0 && port == getDefaultBindSocket().getPort()) {
+        if (de.maxhenkel.voicechat.voice.transport.TransportMode.parse(getConfig().getTransportMode()).tcp() && port != 0 && port == getDefaultBindSocket().getPort()) {
             throw new IllegalArgumentException("TCP voice proxy needs a port different from the Minecraft proxy port");
         }
         return port;

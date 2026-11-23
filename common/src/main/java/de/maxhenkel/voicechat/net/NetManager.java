@@ -33,7 +33,7 @@ public abstract class NetManager {
         removePlayerStateChannel = registerReceiver(RemovePlayerStatePacket.class, true, false);
         secretChannel = registerReceiver(SecretPacket.class, true, false);
         proxyRoutingChannel = registerReceiver(ProxyRoutingPacket.class, true, false);
-        proxyControlChannel = registerReceiver(ProxyControlPacket.class, false, true);
+        proxyControlChannel = registerReceiver(ProxyControlPacket.class, true, true);
         proxyAudioChannel = registerReceiver(ProxyAudioPacket.class, true, false);
         voiceAvailabilityChannel = registerReceiver(VoiceAvailabilityPacket.class, true, false);
         requestSecretChannel = registerReceiver(RequestSecretPacket.class, false, true);
@@ -53,7 +53,7 @@ public abstract class NetManager {
     protected abstract void sendToServerInternal(Packet<?> packet);
 
     public static void sendToClient(ServerPlayer player, Packet<?> packet) {
-        if (!(packet instanceof VersionPacket) && !Voicechat.SERVER.isCompatible(player)) {
+        if (!(packet instanceof VersionPacket) && !(packet instanceof ProxyControlPacket) && !Voicechat.SERVER.isCompatible(player)) {
             return;
         }
         CommonCompatibilityManager.INSTANCE.getNetManager().sendToClient(packet, player);

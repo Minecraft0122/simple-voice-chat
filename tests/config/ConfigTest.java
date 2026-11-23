@@ -26,7 +26,7 @@ public class ConfigTest {
         check(c.proxyAutoDetect.get() && !c.proxyMode.get(), "automatic detection defaults on, manual mode off");
         String text = Files.readString(file);
         List<String> keys = text.lines().filter(l -> !l.isBlank() && !l.startsWith("#")).map(l -> l.split("=",2)[0]).toList();
-        check(keys.subList(0,7).equals(List.of("transport_mode","transport_preference","port","bind_address","voice_host","proxy_mode","proxy_auto_detect")), "network then proxy key order: " + keys);
+        check(keys.subList(0,8).equals(List.of("transport_mode","transport_preference","allow_original_clients","port","bind_address","voice_host","proxy_mode","proxy_auto_detect")), "network then proxy key order: " + keys);
         check(text.contains("代理") && text.contains("dual") && text.contains("重启"), "persist bilingual comments");
         check(keys.size() == new HashSet<>(keys).size(), "no duplicate keys");
         for (var field : ServerConfig.class.getFields()) {
@@ -36,6 +36,11 @@ public class ConfigTest {
         }
         c.detectProxy(id -> false);
         check(!c.isProxyMode(), "standalone remains direct");
+        c.transportMode.set("tcp");
+        check(c.getTransportMode().equals("dual"), "old tcp configurations automatically permit original UDP clients");
+        c.allowOriginalClients.set(false);
+        check(c.getTransportMode().equals("tcp"), "explicit opt out enforces TCP only");
+        c.transportMode.set("dual"); c.allowOriginalClients.set(true);
         org.spigotmc.SpigotConfig.bungee = true;
         c.detectProxy(id -> false);
         check(c.isProxyMode(), "Spigot forwarding enables proxy mode");
@@ -52,6 +57,10 @@ public class ConfigTest {
         paper.proxies.velocity.enabled = true;
         c.detectProxy(id -> false);
         check(c.isProxyMode(), "Paper Velocity forwarding enables proxy mode");
+        c.applyProxySettings(new ProxySettings(TransportMode.UDP, "udp,tcp", 25581, "public.test"));
+        check(c.getTransportMode().equals("udp") && c.getTransportPreference().equals("udp,tcp"), "proxy settings override runtime negotiation");
+        check(c.transportMode.get().equals("dual") && c.voiceChatPort.get() == 25580, "proxy sync preserves local values");
+        check(Files.readString(file).contains("transport_mode=dual"), "proxy cannot rewrite local config file");
         paper.proxies.velocity.enabled = false;
         com.destroystokyo.paper.PaperConfig.velocitySupport = true;
         c.detectProxy(id -> false);
@@ -61,6 +70,7 @@ public class ConfigTest {
         check(c.isProxyMode(), "Fabric forwarding mod enables proxy mode");
         c.detectProxy(id -> false);
         check(!c.isProxyMode(), "restart resolution does not retain previous detection");
+        check(c.getTransportMode().equals("dual"), "restart discards previous runtime proxy snapshot");
         check(ProxyEnvironment.detect(id -> false, new ClassLoader(null) {}) == null, "missing optional APIs are safe");
         check(ProxyEnvironment.detect(id -> id.equals("fabricproxy-lite"), new ClassLoader(null) {}).equals("FabricProxy-Lite"), "Fabric works without Bukkit APIs");
         var proxies = paper.proxies; paper.proxies = null;
@@ -69,7 +79,12 @@ public class ConfigTest {
         System.setProperty("http.proxyHost", "127.0.0.1"); System.setProperty("socksProxyHost", "127.0.0.1");
         check(ProxyEnvironment.detect(id -> false) == null, "OS and HTTP/SOCKS proxy settings do not enable game proxy mode");
         Path proxyFile = Path.of(args[0], "voicechat-proxy.properties");
-        ConfigBuilder.builder(ProxyConfig::new).path(proxyFile).saveSyncAfterBuild(true).build();
+        ProxyConfig proxy = ConfigBuilder.builder(ProxyConfig::new).path(proxyFile).saveSyncAfterBuild(true).build();
+        check(proxy.transportMode.get().equals("dual"), "new proxy defaults support original UDP and fork TCP clients");
+        proxy.transportMode.set("tcp");
+        check(proxy.getTransportMode().equals("dual"), "existing proxy tcp mode automatically permits original clients");
+        proxy.allowOriginalClients.set(false);
+        check(proxy.getTransportMode().equals("tcp"), "proxy opt out preserves TCP-only deployment");
         String proxyText = Files.readString(proxyFile);
         check(proxyText.contains("代理") && proxyText.contains("TCP") && proxyText.contains("UDP"), "proxy comments are saved");
         ServerConfig reloaded = ConfigBuilder.builder(factory).path(file).saveSyncAfterBuild(true).build();

@@ -31,7 +31,9 @@ public class ServerConfig {
     public ConfigEntry<Boolean> threadedServerSupport;
     public final ConfigEntry<Boolean> proxyMode;
     public final ConfigEntry<Boolean> proxyAutoDetect;
+    public final ConfigEntry<Boolean> allowOriginalClients;
     private boolean detectedProxy;
+    private volatile de.maxhenkel.voicechat.voice.transport.ProxySettings proxySettings;
     public final ConfigEntry<Boolean> allowSpectatorVoice;
     public ConfigEntry<Integer> pluginBandwidthLimitMbps;
     public ConfigEntry<Integer> serverBandwidthLimitMbps;
@@ -45,8 +47,8 @@ public class ServerConfig {
     public ServerConfig(ConfigBuilder builder) {
         builder.header(String.format("%s server config v%s", BuildConstants.PLUGIN_NAME, Voicechat.INSTANCE.getDescription().getVersion()));
 
-        transportMode = builder.stringEntry("transport_mode", "tcp",
-                "[Network / 网络] tcp = fork protocol 1021; udp = upstream protocol 20; dual = both. Default: tcp.",
+        transportMode = builder.stringEntry("transport_mode", "dual",
+                "[Network / 网络] tcp = fork protocol 1021; udp = upstream protocol 20; dual = both. Default: dual.",
                 "tcp：本分支客户端；udp：原版 UDP 客户端；dual：同时接入两者。修改后重启生效。",
                 "Dual binds TCP and UDP on the same address and port; forward BOTH in firewalls and containers.",
                 "dual 必须同时放行 TCP/UDP；服务端兼容两种客户端，不会改变客户端使用的协议。");
@@ -54,6 +56,12 @@ public class ServerConfig {
         transportPreference = builder.stringEntry("transport_preference", "tcp,udp",
                 "Protocol preference for dual-capable clients. Supported values: tcp,udp or udp,tcp.",
                 "双协议客户端优先使用的协议；可选 tcp,udp 或 udp,tcp。只控制首选顺序，不会禁用 transport_mode 中的协议。");
+
+        allowOriginalClients = builder.booleanEntry("allow_original_clients", true,
+                "Allow published upstream UDP protocol-20 clients. Default true also upgrades old tcp-only configurations to dual at runtime.",
+                "默认 true：允许原版 UDP 客户端，旧 transport_mode=tcp 在运行时提升为 dual；不改写原配置。",
+                "Set false to enforce an intentionally TCP-only deployment. Open/forward UDP on the voice port when enabled.",
+                "若确实只允许 TCP，请设为 false；启用时需放行语音端口 UDP。代理模式由代理的同名选项决定。");
 
         voiceChatPort = builder
                 .integerEntry("port", 24454, -1, 65535,
@@ -84,8 +92,8 @@ public class ServerConfig {
         proxyMode = builder.booleanEntry("proxy_mode", false,
                 "[Proxy / 代理] Force central voice proxy mode. Default: false; automatic detection still applies.",
                 "强制启用中央语音代理；false 时仍可自动识别。true 时后端仅上报路由，不监听语音端口。",
-                "Install this fork on Velocity/BungeeCord and every backend, with matching transport_mode.",
-                "代理与后端必须安装本分支并设置相同的 transport_mode；普通 TUN/HTTP/SOCKS 代理不属于此模式。");
+                "Install this fork on Velocity/BungeeCord and every backend. Proxy network settings synchronize before voice authentication.",
+                "代理与后端安装本分支；自动同步代理的传输模式、优先顺序和公网端点，不覆盖本地文件。TUN/HTTP/SOCKS 不属于此模式。");
 
         proxyAutoDetect = builder.booleanEntry("proxy_auto_detect", true,
                 "Automatically enable proxy mode when supported game-proxy forwarding is enabled.",
@@ -210,12 +218,34 @@ public class ServerConfig {
     /** Resolve at startup before validating or opening a voice listener. */
     public void detectProxy(java.util.function.Predicate<String> modLoaded) {
         detectedProxy = false;
+        proxySettings = null;
         if (!proxyAutoDetect.get() || proxyMode.get()) return;
         String source = de.maxhenkel.voicechat.voice.transport.ProxyEnvironment.detect(modLoaded);
         detectedProxy = source != null;
         if (detectedProxy) {
             Voicechat.LOGGER.info("Automatically enabled proxy_mode: {}. No backend voice listener; install the matching voice plugin on the proxy.", source);
         }
+    }
+
+    /** Runtime proxy authority. Local configuration files are never rewritten by a remote peer. */
+    public void applyProxySettings(de.maxhenkel.voicechat.voice.transport.ProxySettings settings) {
+        if (!isProxyMode()) throw new IllegalStateException("Not in proxy mode");
+        proxySettings = java.util.Objects.requireNonNull(settings);
+    }
+
+    public String getTransportMode() {
+        var settings = proxySettings;
+        if (isProxyMode() && settings != null) return settings.mode().name().toLowerCase(java.util.Locale.ROOT);
+        return allowOriginalClients.get() && de.maxhenkel.voicechat.voice.transport.TransportMode.parse(transportMode.get()) == de.maxhenkel.voicechat.voice.transport.TransportMode.TCP ? "dual" : transportMode.get();
+    }
+
+    public de.maxhenkel.voicechat.voice.transport.ProxySettings getProxySettings() {
+        return isProxyMode() ? proxySettings : null;
+    }
+
+    public String getTransportPreference() {
+        var settings = proxySettings;
+        return isProxyMode() && settings != null ? settings.preference() : transportPreference.get();
     }
 
     public boolean isProxyMode() {
