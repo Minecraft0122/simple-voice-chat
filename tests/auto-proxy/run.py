@@ -24,7 +24,8 @@ for module in ('common', 'bukkit'):
     control = method((base/'voice/server/Server.java').read_text(encoding='utf-8'), f'public void handleProxyControl({player}')
     assert control.index('CONFIG_RESPONSE') < control.index('SERVER.isCompatible'), 'Config responses must work before voice auth'
     for loader in ('fabric', 'neoforge', 'quilt'):
-        loader_source = next((root/loader/'src/main/java/de/maxhenkel/voicechat/net').glob('*NetManager.java')).read_text(encoding='utf-8')
+        name = {'fabric': 'Fabric', 'neoforge': 'NeoForge', 'quilt': 'Quilt'}[loader] + 'NetManager.java'
+        loader_source = (root/loader/'src/main/java/de/maxhenkel/voicechat/net'/name).read_text(encoding='utf-8')
         assert 'packetType.equals(ProxyControlPacket.class) && Voicechat.SERVER_CONFIG.isProxyMode()' in loader_source
     harness = '''package de.maxhenkel.voicechat.voice.transport;
 import java.util.*;import java.util.concurrent.*;
