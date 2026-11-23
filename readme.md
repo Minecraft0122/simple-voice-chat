@@ -38,6 +38,8 @@ Folia 26.1.2 后端必须启用 `proxy_mode=true`；玩家位置和权限通过�
 
 ## 原版客户端与自动代理配置（tcp.3.3）
 
+`tcp.3.4` 修复 Paper/Folia 的收包入口在语音认证前丢弃代理配置回复和版本消息的问题。出现 `Voice proxy configuration sync timed out` 表示后端已经进入代理模式，不应通过手动开启 `proxy_mode` 解决此错误。同步请求在第 1、3 秒有限重试，以容忍初次加入/切服期间代理连接尚未完成的情况；成功、断开或过期后不再重试，原 5 秒超时限制保持不变。
+
 - 原版客户端继续使用 UDP，无需安装本分支客户端。服务端支持已发布的协议 20 客户端；CI 会下载 Modrinth 作者项目中对应 Minecraft 版本最新发布的 Fabric 客户端，校验 SHA-512 并检查其协议号。协议变更会使检查失败，不能把未来版本自动视为兼容。
 - 新配置默认 `transport_mode=dual`、`allow_original_clients=true`。旧配置即使保留 `transport_mode=tcp`，默认也会按 dual 运行；仅 TCP 部署需显式设置 `allow_original_clients=false`。因此升级时必须确认语音端口 UDP 也已放行。
 - `proxy_auto_detect=true` 默认识别 Paper/Folia 的 Velocity 转发、Spigot/BungeeCord 转发和 FabricProxy-Lite；直连环境不进入代理模式。手动 `proxy_mode=true` 用于未覆盖的转发集成；TUN/HTTP/SOCKS 不触发此模式。

@@ -44,7 +44,7 @@ public class PaperNetManager extends NetManager {
                         FriendlyByteBuf buffer = new FriendlyByteBuf(Unpooled.wrappedBuffer(bytes));
 
                         packet.fromBytes(buffer);
-                        if (!Voicechat.SERVER.isCompatible(serverPlayer) && !packetType.equals(RequestSecretPacket.class)) {
+                        if (!Voicechat.SERVER.isCompatible(serverPlayer) && !acceptsBeforeVoiceAuthentication(packetType)) {
                             return;
                         }
                         c.onServerPacket(serverPlayer, packet);
@@ -66,6 +66,12 @@ public class PaperNetManager extends NetManager {
     @Override
     protected void sendToServerInternal(Packet<?> packet) {
         throw new UnsupportedOperationException();
+    }
+
+    /** Configuration replies and version diagnostics must arrive before voice authentication. */
+    private static boolean acceptsBeforeVoiceAuthentication(Class<?> packetType) {
+        return packetType.equals(RequestSecretPacket.class) || packetType.equals(VersionPacket.class)
+                || (packetType.equals(ProxyControlPacket.class) && Voicechat.SERVER_CONFIG.isProxyMode());
     }
 
     @Override

@@ -25,6 +25,7 @@ public class ProxyConfigSyncTest {
         ProxyConfigSync sync = new ProxyConfigSync();
         UUID nonce = sync.begin(player, 1000L);
         check(nonce != null && sync.begin(player, 1001L) == null, "only one request per player can be pending");
+        check(sync.isPending(player, nonce, 1002L), "in-flight request permits bounded retries");
         byte[] request = ProxyMessages.encode(ProxyMessages.CONFIG_REQUEST, 0L, nonce, new byte[0]);
         proxy.getSniffer().onPluginMessage(VoiceProxy.PROXY_CONTROL_CHANNEL, false, ByteBuffer.wrap(request), player);
         check(proxy.backend.isEmpty(), "client cannot forge a config request or obtain internal settings");
@@ -37,7 +38,9 @@ public class ProxyConfigSyncTest {
                 && settings.port() == proxy.port && settings.voiceHost().equals("voice.example.test:24454"), "proxy owns all shared network fields");
         check(!sync.accept(player, UUID.randomUUID(), 1002L), "unsolicited config cannot complete request");
         check(sync.accept(player, nonce, 1002L) && !sync.accept(player, nonce, 1003L), "valid reply consumed exactly once");
+        check(!sync.isPending(player, nonce, 1003L), "completed request cancels retries");
         nonce = sync.begin(player, 2000L);
+        check(!sync.isPending(player, nonce, 7000L), "expired requests cannot be retried");
         check(!sync.accept(player, nonce, 7000L) && sync.expire(player, nonce), "late replies cannot authenticate voice");
         UUID old = sync.begin(player, 8000L); sync.remove(player);
         UUID current = sync.begin(player, 8001L);

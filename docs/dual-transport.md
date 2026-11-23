@@ -134,6 +134,8 @@ Linux/macOS 对应使用 scripts/test-tcp.sh、test-proxy.sh、test-runtime.sh�
 
 ## 自动配置同步
 
+Paper/Folia 请使用 tcp.3.4 或更新的后端构建：tcp.3.3 的 Paper 专用入口可能在语音认证前丢弃配置回复，形成认证互相等待。`Voice proxy configuration sync timed out` 本身说明已经进入代理模式，不表示需要手动开启代理模式。新构建在 1、3 秒重试未完成的请求，应答完成后立即停止；5 秒仍未应答才提示。代理端 tcp.3.3 已支持此同步协议，建议两端使用本次同版本构建以便排查。
+
 代理和后端均需升级到 tcp.3.3 或更新的匹配构建。保留 proxy_auto_detect=true 即可根据游戏转发配置自动选择代理模式，无需手动修改 proxy_mode。未覆盖的自定义转发仍可手动强制开启。
 
 玩家加入或申请语音密钥时，后端主动发送带一次性标识的配置请求。代理返回有效传输模式、传输优先顺序、公网语音端口、voice_host。后端仅在运行时应用网络快照；公网端点由代理写入返回客户端的 secret。距离、权限、群组、审核及限流规则不参加覆盖。新配置默认 dual；旧 tcp 配置也因 allow_original_clients=true 默认启用 UDP。代理是网络设置来源，后端同名设置不需要手动对齐。

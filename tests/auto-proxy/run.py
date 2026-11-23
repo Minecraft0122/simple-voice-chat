@@ -18,7 +18,11 @@ for module in ('common', 'bukkit'):
     source = (base/'voice/server/ServerVoiceEvents.java').read_text(encoding='utf-8')
     player = 'ServerPlayer' if module == 'common' else 'Player'
     methods = '\n'.join(method(source, signature) for signature in (
-        f'public void onRequestSecretPacket({player}', f'private void requestProxySettings({player}', f'public void onProxySettings({player}'))
+        f'public void onRequestSecretPacket({player}', f'private void requestProxySettings({player}',
+        f'private void retryProxySettings({player}', f'public void onProxySettings({player}'))
+    paper = (root/'paper/src/main/java/de/maxhenkel/voicechat/net/PaperNetManager.java').read_text(encoding='utf-8')
+    assert '!Voicechat.SERVER.isCompatible(serverPlayer) && !acceptsBeforeVoiceAuthentication(packetType)' in method(paper, 'public <T extends Packet<T>> Channel<T> registerReceiver(')
+    methods += '\n' + method(paper, 'private static boolean acceptsBeforeVoiceAuthentication(')
     net = (base/'net/NetManager.java').read_text(encoding='utf-8')
     assert 'instanceof ProxyControlPacket' in net, 'Config requests must bypass voice compatibility gate'
     control = method((base/'voice/server/Server.java').read_text(encoding='utf-8'), f'public void handleProxyControl({player}')
@@ -39,19 +43,32 @@ public class BackendSyncTest {
     static void check(boolean condition, String label) { if (!condition) throw new AssertionError(label); }
     public static void main(String[] args) {
         var test = new BackendSyncTest(); var player = new PLAYER();
+        check(acceptsBeforeVoiceAuthentication(RequestSecretPacket.class), "Paper accepts initial authentication requests");
+        check(acceptsBeforeVoiceAuthentication(VersionPacket.class), "Paper accepts version diagnostics before authentication");
+        check(!acceptsBeforeVoiceAuthentication(ProxyControlPacket.class), "standalone Paper rejects pre-auth proxy control");
+        check(!acceptsBeforeVoiceAuthentication(UpdateStatePacket.class), "Paper still rejects unauthenticated state packets");
         test.onRequestSecretPacket(player, new RequestSecretPacket());
         check(test.authenticated == 1 && NetManager.last == null, "standalone needs no voice proxy");
         test.authenticated = 0; Voicechat.SERVER_CONFIG.proxy = true;
+        check(acceptsBeforeVoiceAuthentication(ProxyControlPacket.class), "Paper/Folia accepts proxy configuration reply before voice authentication");
+        check(!acceptsBeforeVoiceAuthentication(UpdateStatePacket.class), "proxy mode does not bypass authentication for normal packets");
         test.onRequestSecretPacket(player, new RequestSecretPacket());
         check(test.authenticated == 0, "never issue a voice secret before synchronized settings");
         var request = ProxyMessages.decode(NetManager.last);
         check(request.type() == ProxyMessages.CONFIG_REQUEST, "backend initiates synchronization");
+        int beforeRetry = NetManager.sent;
+        test.retryProxySettings(player, request.session());
+        check(NetManager.sent == beforeRetry + 1, "lost initial request is retried with the same nonce");
+        check(ProxyMessages.decode(NetManager.last).session().equals(request.session()), "retry does not replace the active nonce");
         ProxySettings settings = new ProxySettings(TransportMode.UDP, "udp,tcp", 24460, "public.test");
         test.onProxySettings(player, new ProxyMessages.Message(ProxyMessages.CONFIG_RESPONSE, 0L, UUID.randomUUID(), settings.encode()));
         check(test.authenticated == 0, "unsolicited response cannot authenticate");
         var response = new ProxyMessages.Message(ProxyMessages.CONFIG_RESPONSE, 0L, request.session(), settings.encode());
         test.onProxySettings(player, response);
         check(test.authenticated == 1 && Voicechat.SERVER_CONFIG.settings.equals(settings), "valid settings applied before authentication");
+        int afterReply = NetManager.sent;
+        test.retryProxySettings(player, request.session());
+        check(NetManager.sent == afterReply, "successful sync stops scheduled retries");
         test.onProxySettings(player, response);
         check(test.authenticated == 1, "replayed response ignored");
         test.onRequestSecretPacket(player, new RequestSecretPacket());
@@ -66,10 +83,12 @@ public class BackendSyncTest {
         boolean isOnline(){return true;} void sendMessage(String s){} }
     static class ServerPlayer extends Player { UUID getUUID(){return id;} void sendSystemMessage(Component c){} }
     static class RequestSecretPacket {}
+    static class VersionPacket {}
+    static class UpdateStatePacket {}
     record ProxyControlPacket(byte[] data) {}
     static class Server { Object getServer(){return this;} }
     record Component(String value) {static Component literal(String s){return new Component(s);}}
-    static class NetManager {static byte[] last;static void sendToClient(Player p, ProxyControlPacket packet){last=packet.data();}}
+    static class NetManager {static byte[] last;static int sent;static void sendToClient(Player p, ProxyControlPacket packet){last=packet.data();sent++;}}
     static class Voicechat {static final Config SERVER_CONFIG=new Config();static final Logger LOGGER=new Logger();
         static final Compatibility compatibility=new Compatibility();}
     static class Config { boolean proxy; ProxySettings settings;boolean isProxyMode(){return proxy;}

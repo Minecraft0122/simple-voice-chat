@@ -20,6 +20,12 @@ public final class ProxyConfigSync {
                 && now - request.started() < TIMEOUT_MS && requests.remove(player, request);
     }
 
+    public boolean isPending(UUID player, UUID nonce, long now) {
+        Request request = requests.get(player);
+        return request != null && request.nonce().equals(nonce) && now >= request.started()
+                && now - request.started() < TIMEOUT_MS;
+    }
+
     public boolean expire(UUID player, UUID nonce) {
         Request request = requests.get(player);
         return request != null && request.nonce().equals(nonce) && requests.remove(player, request);

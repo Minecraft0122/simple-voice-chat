@@ -109,6 +109,15 @@ public class ServerVoiceEvents {
         UUID nonce = proxyConfigSync.begin(player.getUUID(), System.currentTimeMillis());
         if (nonce == null) return;
         NetManager.sendToClient(player, new ProxyControlPacket(ProxyMessages.encode(ProxyMessages.CONFIG_REQUEST, 0L, nonce, new byte[0])));
+        // Initial backend messages may precede the proxy's completed server-switch event.
+        Server requestServer = server;
+        for (int delay : new int[]{1, 3}) {
+            java.util.concurrent.CompletableFuture.delayedExecutor(delay, java.util.concurrent.TimeUnit.SECONDS).execute(() -> {
+                if (requestServer == null || server != requestServer) return;
+                CommonCompatibilityManager.INSTANCE.executeForPlayer(requestServer.getServer(), player,
+                        () -> retryProxySettings(player, nonce), () -> {});
+            });
+        }
         java.util.concurrent.CompletableFuture.delayedExecutor(ProxyConfigSync.TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS).execute(() -> {
             if (server == null) return;
             CommonCompatibilityManager.INSTANCE.executeForPlayer(server.getServer(), player, () -> {
@@ -118,6 +127,11 @@ public class ServerVoiceEvents {
                 player.sendSystemMessage(Component.literal("语音代理配置同步超时，请管理员确认代理和后端均已更新。"));
             }, () -> { if (proxyConfigSync.expire(player.getUUID(), nonce)) pendingProxyRequests.remove(player.getUUID()); });
         });
+    }
+
+    private void retryProxySettings(ServerPlayer player, UUID nonce) {
+        if (!proxyConfigSync.isPending(player.getUUID(), nonce, System.currentTimeMillis())) return;
+        NetManager.sendToClient(player, new ProxyControlPacket(ProxyMessages.encode(ProxyMessages.CONFIG_REQUEST, 0L, nonce, new byte[0])));
     }
 
     public void onProxySettings(ServerPlayer player, ProxyMessages.Message message) {

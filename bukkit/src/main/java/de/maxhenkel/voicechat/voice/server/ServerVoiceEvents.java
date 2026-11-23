@@ -107,12 +107,20 @@ public class ServerVoiceEvents implements Listener {
         UUID nonce = proxyConfigSync.begin(player.getUniqueId(), System.currentTimeMillis());
         if (nonce == null) return;
         NetManager.sendToClient(player, new ProxyControlPacket(ProxyMessages.encode(ProxyMessages.CONFIG_REQUEST, 0L, nonce, new byte[0])));
+        for (long ticks : new long[]{20L, 60L}) {
+            Voicechat.compatibility.runTaskLater(() -> retryProxySettings(player, nonce), ticks);
+        }
         Voicechat.compatibility.runTaskLater(() -> {
             if (!proxyConfigSync.expire(player.getUniqueId(), nonce)) return;
             if (pendingProxyRequests.remove(player.getUniqueId()) == null) return;
             Voicechat.LOGGER.warn("Voice proxy configuration sync timed out for {}. Install matching proxy/backend builds.", player.getUniqueId());
             if (player.isOnline()) player.sendMessage("语音代理配置同步超时，请管理员确认代理和后端均已更新。");
         }, 100L);
+    }
+
+    private void retryProxySettings(Player player, UUID nonce) {
+        if (!player.isOnline() || !proxyConfigSync.isPending(player.getUniqueId(), nonce, System.currentTimeMillis())) return;
+        NetManager.sendToClient(player, new ProxyControlPacket(ProxyMessages.encode(ProxyMessages.CONFIG_REQUEST, 0L, nonce, new byte[0])));
     }
 
     public void onProxySettings(Player player, ProxyMessages.Message message) {
